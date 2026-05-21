@@ -5,7 +5,19 @@ import cors from 'cors';
 import multer from 'multer';
 import { parseWorkbook } from './workbooks.js';
 import type { ColumnMapping, ParsedWorkbook } from './types.js';
-import { createBatch, getBatch, markExported, pauseBatch, retryFailed, serializeBatch, startBatch, subscribeBatch } from './queue.js';
+import {
+  createBatch,
+  deleteTask,
+  getBatch,
+  markExported,
+  pauseBatch,
+  pauseTask,
+  retryFailed,
+  retryTask,
+  serializeBatch,
+  startBatch,
+  subscribeBatch
+} from './queue.js';
 import { streamFile } from './fileStore.js';
 import { exportBatchToLark } from './lark.js';
 
@@ -111,6 +123,45 @@ app.post('/api/batches/:id/retry-failed', (req, res) => {
   const batch = retryFailed(req.params.id);
   res.json(serializeBatch(batch));
 });
+
+app.post(
+  '/api/batches/:batchId/tasks/:taskId/pause',
+  asyncHandler(async (req, res) => {
+    const batchId = routeParam(req.params.batchId);
+    const taskId = routeParam(req.params.taskId);
+    if (!batchId || !taskId) {
+      res.status(400).json({ error: '缺少批次 ID 或任务 ID' });
+      return;
+    }
+    const batch = await pauseTask(batchId, taskId);
+    res.json(serializeBatch(batch));
+  })
+);
+
+app.post('/api/batches/:batchId/tasks/:taskId/retry', (req, res) => {
+  const batchId = routeParam(req.params.batchId);
+  const taskId = routeParam(req.params.taskId);
+  if (!batchId || !taskId) {
+    res.status(400).json({ error: '缺少批次 ID 或任务 ID' });
+    return;
+  }
+  const batch = retryTask(batchId, taskId);
+  res.json(serializeBatch(batch));
+});
+
+app.delete(
+  '/api/batches/:batchId/tasks/:taskId',
+  asyncHandler(async (req, res) => {
+    const batchId = routeParam(req.params.batchId);
+    const taskId = routeParam(req.params.taskId);
+    if (!batchId || !taskId) {
+      res.status(400).json({ error: '缺少批次 ID 或任务 ID' });
+      return;
+    }
+    const batch = await deleteTask(batchId, taskId);
+    res.json(serializeBatch(batch));
+  })
+);
 
 app.get('/api/batches/:id/events', (req, res) => {
   const batch = getBatch(req.params.id);

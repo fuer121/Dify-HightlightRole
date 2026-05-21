@@ -46,6 +46,29 @@ function extractWorkflowRunId(payload: unknown): string | undefined {
   return undefined;
 }
 
+function extractTaskId(payload: unknown): string | undefined {
+  if (!isObject(payload)) return undefined;
+  if (typeof payload.task_id === 'string') return payload.task_id;
+  const data = payload.data;
+  if (isObject(data) && typeof data.task_id === 'string') return data.task_id;
+  return undefined;
+}
+
+export function extractProgress(payload: unknown): { percent?: number; label?: string } {
+  if (!isObject(payload)) return {};
+  const event = typeof payload.event === 'string' ? payload.event : undefined;
+  const data = isObject(payload.data) ? payload.data : undefined;
+  const title =
+    (data && typeof data.title === 'string' ? data.title : undefined) ??
+    (data && typeof data.node_title === 'string' ? data.node_title : undefined);
+
+  if (event === 'workflow_started') return { percent: 5, label: '工作流已开始' };
+  if (event === 'node_started') return { percent: 25, label: title ? `执行节点：${title}` : '节点执行中' };
+  if (event === 'node_finished') return { percent: 70, label: title ? `节点完成：${title}` : '节点已完成' };
+  if (event === 'workflow_finished') return { percent: 100, label: '工作流已完成' };
+  return {};
+}
+
 function eventErrorMessage(payload: unknown) {
   if (!isObject(payload)) return undefined;
   if (typeof payload.message === 'string') return payload.message;
@@ -65,8 +88,12 @@ function buildPayload(task: BatchTask, responseMode: string, batchId: string) {
       chapter_sort: task.input.chapter_sort
     },
     response_mode: responseMode,
-    user: `local-batch-${batchId}`
+    user: difyUserForBatch(batchId)
   };
+}
+
+export function difyUserForBatch(batchId: string) {
+  return `local-batch-${batchId}`;
 }
 
 function shouldRetryStatus(status: number) {
@@ -81,6 +108,7 @@ async function runBlocking(task: BatchTask, response: Response): Promise<DifyRun
   }
   return {
     workflowRunId: extractWorkflowRunId(payload),
+    taskId: extractTaskId(payload),
     outputs: extractOutputs(payload),
     raw: payload
   };
@@ -105,7 +133,7 @@ function parseSseJson(block: string) {
   return JSON.parse(data);
 }
 
-async function runStreaming(task: BatchTask, response: Response): Promise<DifyRunResult> {
+async function runStreaming(task: BatchTask, response: Response, onEvent?: (payload: unknown) => void): Promise<DifyRunResult> {
   if (!response.body) {
     throw new DifyError('Dify streaming 响应没有 body', { retryable: true });
   }
@@ -115,6 +143,7 @@ async function runStreaming(task: BatchTask, response: Response): Promise<DifyRu
   let buffer = '';
   let lastPayload: unknown;
   let workflowRunId: string | undefined;
+  let taskId: string | undefined;
   let outputs: Record<string, unknown> = {};
 
   while (true) {
@@ -128,9 +157,12 @@ async function runStreaming(task: BatchTask, response: Response): Promise<DifyRu
       const payload = parseSseJson(block);
       if (!payload) continue;
       lastPayload = payload;
+      onEvent?.(payload);
 
       const nextWorkflowRunId = extractWorkflowRunId(payload);
       if (nextWorkflowRunId) workflowRunId = nextWorkflowRunId;
+      const nextTaskId = extractTaskId(payload);
+      if (nextTaskId) taskId = nextTaskId;
 
       if (isObject(payload) && payload.event === 'error') {
         throw new DifyError(eventErrorMessage(payload) ?? 'Dify streaming 返回错误', {
@@ -154,6 +186,8 @@ async function runStreaming(task: BatchTask, response: Response): Promise<DifyRu
       lastPayload = payload;
       outputs = extractOutputs(payload);
       workflowRunId = extractWorkflowRunId(payload) ?? workflowRunId;
+      taskId = extractTaskId(payload) ?? taskId;
+      onEvent?.(payload);
     }
   }
 
@@ -163,12 +197,17 @@ async function runStreaming(task: BatchTask, response: Response): Promise<DifyRu
 
   return {
     workflowRunId,
+    taskId,
     outputs,
     raw: lastPayload
   };
 }
 
-export async function runDifyWorkflow(task: BatchTask, batchId: string): Promise<DifyRunResult> {
+export async function runDifyWorkflow(
+  task: BatchTask,
+  batchId: string,
+  onEvent?: (payload: unknown) => void
+): Promise<DifyRunResult> {
   const apiKey = process.env.DIFY_API_KEY;
   if (!apiKey) {
     throw new DifyError('缺少 DIFY_API_KEY，请检查 .env.local', { retryable: false });
@@ -203,7 +242,35 @@ export async function runDifyWorkflow(task: BatchTask, batchId: string): Promise
   if (responseMode === 'blocking') {
     return runBlocking(task, response);
   }
-  return runStreaming(task, response);
+  return runStreaming(task, response, onEvent);
+}
+
+export async function stopDifyWorkflowTask(taskId: string, batchId: string) {
+  const apiKey = process.env.DIFY_API_KEY;
+  if (!apiKey) {
+    throw new DifyError('缺少 DIFY_API_KEY，请检查 .env.local', { retryable: false });
+  }
+
+  const response = await fetch(apiUrl(`/workflows/tasks/${taskId}/stop`), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      user: difyUserForBatch(batchId)
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new DifyError(`Dify 停止任务失败 ${response.status}${text ? `: ${text}` : ''}`, {
+      retryable: shouldRetryStatus(response.status),
+      status: response.status
+    });
+  }
+
+  return response.json().catch(() => ({}));
 }
 
 function toStringArray(value: unknown) {
@@ -279,6 +346,9 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
   const outputs = result.outputs ?? {};
   const files = await normalizeFileValue(task.id, outputs.result);
   task.workflow_run_id = result.workflowRunId;
+  task.dify_task_id = result.taskId ?? task.dify_task_id;
+  task.progress_percent = 100;
+  task.progress_label = '已完成';
   task.role = toStringArray(outputs.role);
   task.title = outputString(outputs.title);
   task.result_files = files;
@@ -291,6 +361,8 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
 
 export const __testables = {
   extractOutputs,
+  extractTaskId,
+  extractProgress,
   parseSseBlocks,
   parseSseJson,
   normalizeFileValue
