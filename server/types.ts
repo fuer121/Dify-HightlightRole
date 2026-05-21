@@ -47,6 +47,11 @@ export interface BatchTask {
   finished_at?: string;
   elapsed_seconds?: number;
   workflow_run_id?: string;
+  dify_task_id?: string;
+  progress_percent?: number;
+  progress_label?: string;
+  pause_reason?: 'batch' | 'task' | 'stop';
+  stop_requested_at?: string;
   role?: string[];
   title?: string;
   result_files: ResultFile[];
@@ -82,6 +87,7 @@ export interface BatchLogEvent {
 
 export interface DifyRunResult {
   workflowRunId?: string;
+  taskId?: string;
   outputs: Record<string, unknown>;
   raw: unknown;
 }

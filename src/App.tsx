@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Trash2,
   Upload,
   XCircle
 } from 'lucide-react';
@@ -56,6 +57,11 @@ interface BatchTask {
   finished_at?: string;
   elapsed_seconds?: number;
   workflow_run_id?: string;
+  dify_task_id?: string;
+  progress_percent?: number;
+  progress_label?: string;
+  pause_reason?: 'batch' | 'task' | 'stop';
+  stop_requested_at?: string;
   role?: string[];
   title?: string;
   result_files: ResultFile[];
@@ -260,6 +266,24 @@ export function App() {
     }
   }
 
+  async function taskAction(task: BatchTask, action: 'pause' | 'retry' | 'delete') {
+    if (!batch) return;
+    setError(null);
+    try {
+      const method = action === 'delete' ? 'DELETE' : 'POST';
+      const suffix = action === 'delete' ? '' : `/${action}`;
+      const nextBatch = await fetch(`/api/batches/${batch.id}/tasks/${task.id}${suffix}`, {
+        method
+      }).then((response) => readJson<Batch>(response));
+      setBatch(nextBatch);
+      if (action === 'delete' && selectedTaskId === task.id) {
+        setSelectedTaskId(nextBatch.tasks[0]?.id ?? null);
+      }
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : '任务操作失败');
+    }
+  }
+
   async function exportToLark() {
     if (!batch) return;
     setError(null);
@@ -429,9 +453,11 @@ export function App() {
                     <th>行号</th>
                     <th>书籍 ID</th>
                     <th>章节</th>
+                    <th>进度</th>
                     <th>段落内容</th>
                     <th>标题</th>
                     <th>耗时</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -467,9 +493,15 @@ export function App() {
                       <td>{task.row_no}</td>
                       <td>{task.input.book_id || '-'}</td>
                       <td>{task.input.chapter_sort || '-'}</td>
+                      <td>
+                        <ProgressCell task={task} />
+                      </td>
                       <td>{truncate(task.input.paragraph_content, 80)}</td>
                       <td>{task.title || '-'}</td>
                       <td>{task.elapsed_seconds ? `${task.elapsed_seconds}s` : '-'}</td>
+                      <td>
+                        <TaskActions task={task} onAction={(action) => void taskAction(task, action)} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -520,6 +552,7 @@ export function App() {
                   {statusIcon(selectedTask.status)}
                   第 {selectedTask.row_no} 行 · {statusLabel[selectedTask.status]}
                 </div>
+                <ProgressCell task={selectedTask} wide />
                 <h2>{selectedTask.title || '暂无标题'}</h2>
                 <p className="muted">角色：{selectedTask.role?.join('、') || '-'}</p>
                 {selectedTask.result_files.length > 0 ? (
@@ -592,6 +625,46 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: 'su
     <div className={`stat-card ${tone ?? ''}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ProgressCell({ task, wide = false }: { task: BatchTask; wide?: boolean }) {
+  const percent =
+    task.status === 'succeeded'
+      ? 100
+      : task.status === 'queued' || task.status === 'paused'
+        ? 0
+        : Math.max(0, Math.min(100, task.progress_percent ?? (task.status === 'running' ? 8 : 0)));
+  const label = task.progress_label ?? (task.status === 'running' ? '执行中' : statusLabel[task.status]);
+
+  return (
+    <div className={`progress-cell ${wide ? 'wide' : ''}`}>
+      <div className="progress-track">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <small>{label}</small>
+    </div>
+  );
+}
+
+function TaskActions({ task, onAction }: { task: BatchTask; onAction: (action: 'pause' | 'retry' | 'delete') => void }) {
+  const validationFailed = task.error?.startsWith('字段校验失败') ?? false;
+  const canPause = task.status === 'queued' || task.status === 'running';
+  const canRetry = ['failed', 'paused', 'succeeded'].includes(task.status) && !validationFailed;
+  const deletingLabel = task.status === 'running' ? '停止并删除' : '删除';
+
+  return (
+    <div className="task-actions" onClick={(event) => event.stopPropagation()}>
+      <button title="暂停任务" disabled={!canPause} onClick={() => onAction('pause')}>
+        <Pause size={14} />
+      </button>
+      <button title="重试任务" disabled={!canRetry} onClick={() => onAction('retry')}>
+        <RefreshCw size={14} />
+      </button>
+      <button title={deletingLabel} onClick={() => onAction('delete')}>
+        <Trash2 size={14} />
+      </button>
     </div>
   );
 }
