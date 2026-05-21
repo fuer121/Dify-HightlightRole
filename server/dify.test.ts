@@ -49,6 +49,43 @@ describe('dify helpers', () => {
     });
   });
 
+  it('extracts configured intermediate outputs from node_finished payloads', () => {
+    expect(
+      __testables.extractIntermediateOutputs({
+        event: 'node_finished',
+        data: {
+          node_id: '1778480914080',
+          title: 'is_valid赋值',
+          outputs: {
+            is_valid: '1'
+          }
+        }
+      })
+    ).toEqual({ is_valid: '1' });
+
+    expect(
+      __testables.extractIntermediateOutputs({
+        event: 'node_finished',
+        data: {
+          id: '1778480918522',
+          title: '生成段落描述',
+          outputs: {
+            text: '一段可用于生成角色图的画面描述'
+          }
+        }
+      })
+    ).toEqual({ paragraph_description: '一段可用于生成角色图的画面描述' });
+  });
+
+  it('treats busy upstream model errors as retryable', () => {
+    expect(
+      __testables.isRetryableDifyErrorMessage(
+        '[models] Error: API request failed with status code 503: {"error":{"message":"Service is too busy.","type":"service_unavailable_error"}}'
+      )
+    ).toBe(true);
+    expect(__testables.isRetryableDifyErrorMessage('字段校验失败：book_id 为空')).toBe(false);
+  });
+
   it('normalizes relative Dify file URLs into preview files', async () => {
     process.env.DIFY_API_BASE = 'http://dify.qmniu.com/v1';
     const files = await __testables.normalizeFileValue('task-1', {

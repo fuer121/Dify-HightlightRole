@@ -1,7 +1,15 @@
 import { nanoid } from 'nanoid';
 import type { Batch, BatchLogEvent, BatchTask, ColumnMapping, ParsedWorkbook } from './types.js';
 import { compileRows } from './workbooks.js';
-import { applyDifyResult, DifyError, extractProgress, runDifyWorkflow, stopDifyWorkflowTask, __testables } from './dify.js';
+import {
+  applyDifyResult,
+  DifyError,
+  extractIntermediateOutputs,
+  extractProgress,
+  runDifyWorkflow,
+  stopDifyWorkflowTask,
+  __testables
+} from './dify.js';
 
 type RunWorkflow = typeof runDifyWorkflow;
 type StopWorkflow = typeof stopDifyWorkflowTask;
@@ -142,6 +150,8 @@ function resetTaskForRetry(task: BatchTask) {
   task.progress_label = '等待执行';
   task.pause_reason = undefined;
   task.stop_requested_at = undefined;
+  task.is_valid = undefined;
+  task.paragraph_description = undefined;
   task.role = undefined;
   task.title = undefined;
   task.result_files = [];
@@ -162,6 +172,8 @@ async function runTask(batch: Batch, task: BatchTask) {
   task.error = undefined;
   task.result_files = [];
   task.stop_requested_at = undefined;
+  task.is_valid = undefined;
+  task.paragraph_description = undefined;
   task.progress_percent = 5;
   task.progress_label = '准备请求 Dify';
   addEvent(batch, 'task', `开始执行第 ${task.row_no} 行`, task.id);
@@ -178,6 +190,9 @@ async function runTask(batch: Batch, task: BatchTask) {
         if (progress.label) task.progress_label = progress.label;
         const maybeTaskId = __testables.extractTaskId(payload);
         if (typeof maybeTaskId === 'string') task.dify_task_id = maybeTaskId;
+        const intermediate = extractIntermediateOutputs(payload);
+        if (intermediate.is_valid !== undefined) task.is_valid = intermediate.is_valid;
+        if (intermediate.paragraph_description !== undefined) task.paragraph_description = intermediate.paragraph_description;
         emit(batch);
       });
       if (task.stop_requested_at) {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ParsedWorkbook } from './types.js';
-import { __setWorkflowControlsForTest, createBatch, deleteTask, pauseTask, retryTask } from './queue.js';
+import { __setWorkflowControlsForTest, createBatch, deleteTask, pauseTask, retryTask, startBatch } from './queue.js';
 
 const workbook: ParsedWorkbook = {
   id: 'workbook-1',
@@ -67,6 +67,45 @@ describe('queue', () => {
     expect(['queued', 'running']).toContain(task.status);
     expect(task.attempts).toBeLessThan(2);
     expect(task.error).toBeUndefined();
+  });
+
+  it('captures intermediate Dify node outputs during streaming execution', async () => {
+    __setWorkflowControlsForTest(async (_task, _batchId, onEvent) => {
+      onEvent?.({
+        event: 'node_finished',
+        task_id: 'task-1',
+        data: {
+          node_id: '1778480914080',
+          title: 'is_valid赋值',
+          outputs: { is_valid: 0 }
+        }
+      });
+      onEvent?.({
+        event: 'node_finished',
+        task_id: 'task-1',
+        data: {
+          node_id: '1778480918522',
+          title: '生成段落描述',
+          outputs: { text: '中间生成的段落描述' }
+        }
+      });
+      return {
+        workflowRunId: 'run-1',
+        taskId: 'task-1',
+        outputs: {
+          role: ['角色'],
+          title: '标题'
+        },
+        raw: {}
+      };
+    });
+
+    const batch = makeBatch();
+    startBatch(batch.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(batch.tasks[0].is_valid).toBe(0);
+    expect(batch.tasks[0].paragraph_description).toBe('中间生成的段落描述');
   });
 
   it('does not retry validation-failed tasks', () => {
