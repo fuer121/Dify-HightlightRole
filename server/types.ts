@@ -52,6 +52,8 @@ export interface BatchTask {
   progress_label?: string;
   pause_reason?: 'batch' | 'task' | 'stop';
   stop_requested_at?: string;
+  is_valid?: unknown;
+  paragraph_description?: string;
   role?: string[];
   title?: string;
   result_files: ResultFile[];

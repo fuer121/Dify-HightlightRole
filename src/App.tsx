@@ -62,6 +62,8 @@ interface BatchTask {
   progress_label?: string;
   pause_reason?: 'batch' | 'task' | 'stop';
   stop_requested_at?: string;
+  is_valid?: unknown;
+  paragraph_description?: string;
   role?: string[];
   title?: string;
   result_files: ResultFile[];
@@ -454,7 +456,9 @@ export function App() {
                     <th>书籍 ID</th>
                     <th>章节</th>
                     <th>进度</th>
+                    <th>is_valid</th>
                     <th>段落内容</th>
+                    <th>段落描述</th>
                     <th>标题</th>
                     <th>耗时</th>
                     <th>操作</th>
@@ -496,7 +500,11 @@ export function App() {
                       <td>
                         <ProgressCell task={task} />
                       </td>
+                      <td>
+                        <RawValue value={task.is_valid} />
+                      </td>
                       <td>{truncate(task.input.paragraph_content, 80)}</td>
+                      <td>{task.paragraph_description ? truncate(task.paragraph_description, 80) : '-'}</td>
                       <td>{task.title || '-'}</td>
                       <td>{task.elapsed_seconds ? `${task.elapsed_seconds}s` : '-'}</td>
                       <td>
@@ -554,7 +562,18 @@ export function App() {
                 </div>
                 <ProgressCell task={selectedTask} wide />
                 <h2>{selectedTask.title || '暂无标题'}</h2>
-                <p className="muted">角色：{selectedTask.role?.join('、') || '-'}</p>
+                <div className="result-meta">
+                  <span>
+                    is_valid：<RawValue value={selectedTask.is_valid} compact />
+                  </span>
+                  <span>角色：{selectedTask.role?.join('、') || '-'}</span>
+                </div>
+                {selectedTask.paragraph_description && (
+                  <div className="description-output">
+                    <strong>生成段落描述</strong>
+                    <p>{selectedTask.paragraph_description}</p>
+                  </div>
+                )}
                 {selectedTask.result_files.length > 0 ? (
                   <div className="image-grid">
                     {selectedTask.result_files.map((file) => (
@@ -646,6 +665,18 @@ function ProgressCell({ task, wide = false }: { task: BatchTask; wide?: boolean 
       <small>{label}</small>
     </div>
   );
+}
+
+function formatRawValue(value: unknown) {
+  if (value === undefined || value === null) return '-';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function RawValue({ value, compact = false }: { value: unknown; compact?: boolean }) {
+  const text = formatRawValue(value);
+  return <span className={`raw-value ${text === '-' ? 'empty' : ''} ${compact ? 'compact' : ''}`}>{text}</span>;
 }
 
 function TaskActions({ task, onAction }: { task: BatchTask; onAction: (action: 'pause' | 'retry' | 'delete') => void }) {

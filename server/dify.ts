@@ -54,6 +54,48 @@ function extractTaskId(payload: unknown): string | undefined {
   return undefined;
 }
 
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function payloadNodeIdentity(payload: Record<string, unknown>) {
+  const data = isObject(payload.data) ? payload.data : {};
+  const nodeId =
+    stringValue(payload.node_id) ??
+    stringValue(payload.nodeId) ??
+    stringValue(data.node_id) ??
+    stringValue(data.nodeId) ??
+    stringValue(data.id) ??
+    stringValue(payload.id);
+  const title =
+    stringValue(payload.title) ??
+    stringValue(payload.node_title) ??
+    stringValue(payload.nodeTitle) ??
+    stringValue(data.title) ??
+    stringValue(data.node_title) ??
+    stringValue(data.nodeTitle);
+  return { nodeId, title };
+}
+
+export function extractIntermediateOutputs(payload: unknown): Pick<BatchTask, 'is_valid' | 'paragraph_description'> {
+  if (!isObject(payload)) return {};
+  const event = typeof payload.event === 'string' ? payload.event : undefined;
+  if (event && event !== 'node_finished') return {};
+
+  const { nodeId, title } = payloadNodeIdentity(payload);
+  const outputs = extractOutputs(payload);
+  const extracted: Pick<BatchTask, 'is_valid' | 'paragraph_description'> = {};
+
+  if (nodeId === '1778480914080' || title === 'is_valid赋值') {
+    extracted.is_valid = outputs.is_valid;
+  }
+  if (nodeId === '1778480918522' || title === '生成段落描述') {
+    extracted.paragraph_description = outputString(outputs.text);
+  }
+
+  return extracted;
+}
+
 export function extractProgress(payload: unknown): { percent?: number; label?: string } {
   if (!isObject(payload)) return {};
   const event = typeof payload.event === 'string' ? payload.event : undefined;
@@ -80,6 +122,29 @@ function eventErrorMessage(payload: unknown) {
   return undefined;
 }
 
+function isRetryableDifyErrorMessage(message: string) {
+  const normalized = message.toLowerCase();
+  const statusMatch = normalized.match(/status code\s+(\d{3})/);
+  if (statusMatch) {
+    return shouldRetryStatus(Number(statusMatch[1]));
+  }
+  return (
+    normalized.includes('service_unavailable') ||
+    normalized.includes('service unavailable') ||
+    normalized.includes('too busy') ||
+    normalized.includes('temporarily') ||
+    normalized.includes('timeout') ||
+    normalized.includes('timed out') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('overloaded')
+  );
+}
+
+function failedWorkflowError(error: unknown) {
+  const message = String(error ?? 'Dify 工作流执行失败');
+  return new DifyError(message, { retryable: isRetryableDifyErrorMessage(message) });
+}
+
 function buildPayload(task: BatchTask, responseMode: string, batchId: string) {
   return {
     inputs: {
@@ -104,7 +169,7 @@ async function runBlocking(task: BatchTask, response: Response): Promise<DifyRun
   const payload = await response.json();
   const data = isObject(payload) ? payload.data : undefined;
   if (isObject(data) && data.status === 'failed') {
-    throw new DifyError(String(data.error ?? 'Dify 工作流执行失败'), { retryable: false });
+    throw failedWorkflowError(data.error);
   }
   return {
     workflowRunId: extractWorkflowRunId(payload),
@@ -165,15 +230,16 @@ async function runStreaming(task: BatchTask, response: Response, onEvent?: (payl
       if (nextTaskId) taskId = nextTaskId;
 
       if (isObject(payload) && payload.event === 'error') {
-        throw new DifyError(eventErrorMessage(payload) ?? 'Dify streaming 返回错误', {
-          retryable: false
+        const message = eventErrorMessage(payload) ?? 'Dify streaming 返回错误';
+        throw new DifyError(message, {
+          retryable: isRetryableDifyErrorMessage(message)
         });
       }
 
       if (isObject(payload) && payload.event === 'workflow_finished') {
         const data = payload.data;
         if (isObject(data) && data.status === 'failed') {
-          throw new DifyError(String(data.error ?? 'Dify 工作流执行失败'), { retryable: false });
+          throw failedWorkflowError(data.error);
         }
         outputs = extractOutputs(payload);
       }
@@ -349,6 +415,8 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
   task.dify_task_id = result.taskId ?? task.dify_task_id;
   task.progress_percent = 100;
   task.progress_label = '已完成';
+  task.is_valid = outputs.is_valid ?? task.is_valid;
+  task.paragraph_description = outputString(outputs.paragraph_description) ?? outputString(outputs.description) ?? task.paragraph_description;
   task.role = toStringArray(outputs.role);
   task.title = outputString(outputs.title);
   task.result_files = files;
@@ -362,7 +430,9 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
 export const __testables = {
   extractOutputs,
   extractTaskId,
+  extractIntermediateOutputs,
   extractProgress,
+  isRetryableDifyErrorMessage,
   parseSseBlocks,
   parseSseJson,
   normalizeFileValue

@@ -140,6 +140,8 @@ const FIELDS = [
   '书籍 ID',
   '章节序号',
   '段落内容',
+  'is_valid',
+  '段落描述',
   '角色',
   '标题',
   '结果文本/JSON',
@@ -165,6 +167,8 @@ const TABLE_FIELDS = [
   { name: '书籍 ID', type: 'number', style: { type: 'plain', precision: 0 } },
   { name: '章节序号', type: 'number', style: { type: 'plain', precision: 0 } },
   { name: '段落内容', type: 'text' },
+  { name: 'is_valid', type: 'text' },
+  { name: '段落描述', type: 'text' },
   { name: '角色', type: 'text' },
   { name: '标题', type: 'text' },
   { name: '结果图片', type: 'attachment' },
@@ -174,6 +178,13 @@ const TABLE_FIELDS = [
   { name: '错误', type: 'text' }
 ];
 
+function formatRawValue(value: unknown) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
 function taskToRow(task: Batch['tasks'][number]) {
   const raw = task.raw_outputs ? JSON.stringify(task.raw_outputs, null, 2) : '';
   return [
@@ -182,6 +193,8 @@ function taskToRow(task: Batch['tasks'][number]) {
     task.input.book_id,
     task.input.chapter_sort,
     task.input.paragraph_content,
+    formatRawValue(task.is_valid),
+    task.paragraph_description ?? '',
     task.role?.join(', ') ?? '',
     task.title ?? '',
     task.result_text ?? raw,
