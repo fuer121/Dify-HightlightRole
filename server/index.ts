@@ -16,10 +16,12 @@ import {
   retryTask,
   serializeBatch,
   startBatch,
+  startSelectedTasks,
   subscribeBatch
 } from './queue.js';
 import { streamFile } from './fileStore.js';
 import { exportBatchToLark } from './lark.js';
+import { registerQualityRoutes } from './quality.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -44,7 +46,10 @@ app.get('/api/health', (_req, res) => {
     config: {
       hasDifyApiKey: Boolean(process.env.DIFY_API_KEY),
       difyApiBase: process.env.DIFY_API_BASE ?? null,
-      difyResponseMode: process.env.DIFY_RESPONSE_MODE ?? null
+      difyResponseMode: process.env.DIFY_RESPONSE_MODE ?? null,
+      hasQualityDifyApiKey: Boolean(process.env.QUALITY_DIFY_API_KEY ?? process.env.DIFY_QUALITY_API_KEY),
+      qualityDifyApiBase: process.env.QUALITY_DIFY_API_BASE ?? process.env.DIFY_API_BASE ?? null,
+      qualityDifyResponseMode: process.env.QUALITY_DIFY_RESPONSE_MODE ?? null
     }
   });
 });
@@ -82,6 +87,7 @@ app.post(
       workbookId?: string;
       sheetName?: string;
       mapping?: ColumnMapping;
+      rowLimit?: unknown;
     };
 
     if (!workbookId || !sheetName || !mapping) {
@@ -95,7 +101,17 @@ app.post(
       return;
     }
 
-    const batch = createBatch(workbook, sheetName, mapping);
+    let rowLimit: number | undefined;
+    if (req.body.rowLimit !== undefined && req.body.rowLimit !== null && req.body.rowLimit !== '') {
+      const parsed = Number(req.body.rowLimit);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        res.status(400).json({ error: '入队行数必须是大于 0 的整数' });
+        return;
+      }
+      rowLimit = parsed;
+    }
+
+    const batch = createBatch(workbook, sheetName, mapping, { rowLimit });
     res.json(serializeBatch(batch));
   })
 );
@@ -111,6 +127,16 @@ app.get('/api/batches/:id', (req, res) => {
 
 app.post('/api/batches/:id/start', (req, res) => {
   const batch = startBatch(req.params.id);
+  res.json(serializeBatch(batch));
+});
+
+app.post('/api/batches/:id/start-selected', (req, res) => {
+  const taskIds = Array.isArray(req.body?.taskIds) ? req.body.taskIds.filter((item: unknown) => typeof item === 'string') : [];
+  if (taskIds.length === 0) {
+    res.status(400).json({ error: '请选择要生成的任务' });
+    return;
+  }
+  const batch = startSelectedTasks(req.params.id, taskIds);
   res.json(serializeBatch(batch));
 });
 
@@ -226,6 +252,10 @@ app.get(
     streamed.stream.pipe(res);
   })
 );
+
+registerQualityRoutes(app, {
+  getWorkbook: (workbookId) => workbooks.get(workbookId)
+});
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   void _next;

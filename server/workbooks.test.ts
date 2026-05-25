@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { autoMapHeaders, compileRows, parseWorkbook } from './workbooks.js';
+import { autoMapHeaders, compileRows, normalizeUploadFileName, parseWorkbook } from './workbooks.js';
 
 function workbookBuffer(rows: unknown[][]) {
   const workbook = XLSX.utils.book_new();
@@ -48,6 +48,41 @@ describe('workbooks', () => {
         chapter_sort: 3
       }
     });
+  });
+
+  it('limits compiled rows after empty rows are filtered', () => {
+    const workbook = parseWorkbook(
+      workbookBuffer([
+        ['book_id', 'paragraph_content', 'chapter_sort'],
+        [1, '第一段', 1],
+        ['', '', ''],
+        [2, '第二段', 2],
+        [3, '第三段', 3]
+      ]),
+      'limited.xlsx'
+    );
+
+    const rows = compileRows(
+      workbook.sheets[0],
+      {
+        book_id: 'book_id',
+        paragraph_content: 'paragraph_content',
+        chapter_sort: 'chapter_sort'
+      },
+      { rowLimit: 2 }
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.row_no)).toEqual([2, 4]);
+  });
+
+  it('normalizes mojibake Chinese upload file names', () => {
+    const fileName = '废材那又怎样-高光段落_100 条.xlsx';
+    const mojibakeName = Buffer.from(fileName, 'utf8').toString('latin1');
+
+    expect(normalizeUploadFileName(mojibakeName)).toBe(fileName);
+    expect(normalizeUploadFileName(fileName)).toBe(fileName);
+    expect(normalizeUploadFileName('sample.xlsx')).toBe('sample.xlsx');
   });
 
   it('keeps invalid rows with validation errors', () => {

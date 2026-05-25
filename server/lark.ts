@@ -11,15 +11,19 @@ interface CliResult {
   json?: unknown;
 }
 
+interface RunLarkOptions {
+  cwd?: string;
+}
+
 function asIdentityArg() {
   const value = process.env.LARK_CLI_AS || 'user';
   return ['--as', value];
 }
 
-function runLark(args: string[]): Promise<CliResult> {
+function runLark(args: string[], options: RunLarkOptions = {}): Promise<CliResult> {
   return new Promise((resolve, reject) => {
     const child = spawn('lark-cli', args, {
-      cwd: process.cwd(),
+      cwd: options.cwd ?? process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe']
     });
     let stdout = '';
@@ -132,6 +136,10 @@ function larkDate() {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
     date.getMinutes()
   )}:${pad(date.getSeconds())}`;
+}
+
+function relativeCliPath(filePath: string) {
+  return `./${path.basename(filePath)}`;
 }
 
 const FIELDS = [
@@ -252,6 +260,7 @@ async function batchCreateRecords(baseToken: string, tableId: string, batch: Bat
       rows: rows.slice(index, index + 200)
     };
     await writeFile(filePath, JSON.stringify(payload), 'utf8');
+    const fileDir = path.dirname(filePath);
     const result = await runLark([
       'base',
       '+record-batch-create',
@@ -261,8 +270,8 @@ async function batchCreateRecords(baseToken: string, tableId: string, batch: Bat
       '--table-id',
       tableId,
       '--json',
-      `@${filePath}`
-    ]);
+      `@${relativeCliPath(filePath)}`
+    ], { cwd: fileDir });
     recordIds.push(...extractRecordIds(result.json));
   }
   return recordIds;
@@ -276,6 +285,7 @@ async function uploadAttachments(baseToken: string, tableId: string, batch: Batc
     if (!recordId || task.result_files.length === 0) continue;
     for (const file of task.result_files) {
       const filePath = await ensureLocalFile(file);
+      const fileDir = path.dirname(filePath);
       await runLark([
         'base',
         '+record-upload-attachment',
@@ -289,10 +299,8 @@ async function uploadAttachments(baseToken: string, tableId: string, batch: Batc
         '--field-id',
         '结果图片',
         '--file',
-        filePath,
-        '--name',
-        file.name
-      ]);
+        relativeCliPath(filePath)
+      ], { cwd: fileDir });
       uploaded += 1;
     }
   }

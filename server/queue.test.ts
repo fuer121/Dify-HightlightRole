@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ParsedWorkbook } from './types.js';
-import { __setWorkflowControlsForTest, createBatch, deleteTask, pauseTask, retryTask, startBatch } from './queue.js';
+import { __setWorkflowControlsForTest, createBatch, deleteTask, pauseTask, retryTask, startBatch, startSelectedTasks } from './queue.js';
 
 const workbook: ParsedWorkbook = {
   id: 'workbook-1',
@@ -11,11 +11,12 @@ const workbook: ParsedWorkbook = {
       name: 'Sheet1',
       headers: ['book_id', 'paragraph_content', 'chapter_sort'],
       previewRows: [],
-      rowCount: 2,
+      rowCount: 3,
       autoMapping: {},
       rows: [
         { __row_no: 2, book_id: '1', paragraph_content: '高光段落', chapter_sort: '2' },
-        { __row_no: 3, book_id: '', paragraph_content: '坏数据', chapter_sort: '2' }
+        { __row_no: 3, book_id: '2', paragraph_content: '另一个高光段落', chapter_sort: '3' },
+        { __row_no: 4, book_id: '', paragraph_content: '坏数据', chapter_sort: '2' }
       ]
     }
   ]
@@ -36,10 +37,27 @@ describe('queue', () => {
   it('creates tasks and marks validation failures', () => {
     const batch = makeBatch();
 
-    expect(batch.tasks).toHaveLength(2);
+    expect(batch.tasks).toHaveLength(3);
     expect(batch.tasks[0].status).toBe('queued');
-    expect(batch.tasks[1].status).toBe('failed');
-    expect(batch.tasks[1].error).toContain('字段校验失败');
+    expect(batch.tasks[2].status).toBe('failed');
+    expect(batch.tasks[2].error).toContain('字段校验失败');
+  });
+
+  it('creates a batch with only the requested leading rows', () => {
+    const batch = createBatch(
+      workbook,
+      'Sheet1',
+      {
+        book_id: 'book_id',
+        paragraph_content: 'paragraph_content',
+        chapter_sort: 'chapter_sort'
+      },
+      { rowLimit: 2 }
+    );
+
+    expect(batch.rowLimit).toBe(2);
+    expect(batch.tasks).toHaveLength(2);
+    expect(batch.tasks.map((task) => task.row_no)).toEqual([2, 3]);
   });
 
   it('pauses a queued task', async () => {
@@ -111,14 +129,65 @@ describe('queue', () => {
   it('does not retry validation-failed tasks', () => {
     const batch = makeBatch();
 
-    expect(() => retryTask(batch.id, batch.tasks[1].id)).toThrow('字段校验失败');
+    expect(() => retryTask(batch.id, batch.tasks[2].id)).toThrow('字段校验失败');
   });
 
   it('deletes a task from the batch', async () => {
     const batch = makeBatch();
     await deleteTask(batch.id, batch.tasks[0].id);
 
-    expect(batch.tasks).toHaveLength(1);
+    expect(batch.tasks).toHaveLength(2);
     expect(batch.tasks[0].row_no).toBe(3);
+  });
+
+  it('starts only selected queued tasks and leaves other queued tasks untouched', async () => {
+    const ranRows: number[] = [];
+    __setWorkflowControlsForTest(async (task) => {
+      ranRows.push(task.row_no);
+      return {
+        workflowRunId: `run-${task.row_no}`,
+        taskId: `task-${task.row_no}`,
+        outputs: { title: `标题 ${task.row_no}` },
+        raw: {}
+      };
+    });
+
+    const batch = makeBatch();
+    startSelectedTasks(batch.id, [batch.tasks[0].id]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ranRows).toEqual([2]);
+    expect(batch.tasks[0].status).toBe('succeeded');
+    expect(batch.tasks[1].status).toBe('queued');
+    expect(batch.status).toBe('idle');
+  });
+
+  it('resets selected completed tasks before scoped generation', async () => {
+    __setWorkflowControlsForTest(async () => ({
+      workflowRunId: 'run-selected',
+      taskId: 'task-selected',
+      outputs: { title: '新标题' },
+      raw: {}
+    }));
+
+    const batch = makeBatch();
+    const task = batch.tasks[0];
+    task.status = 'succeeded';
+    task.attempts = 2;
+    task.title = '旧标题';
+    task.error = 'old error';
+    startSelectedTasks(batch.id, [task.id]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(task.status).toBe('succeeded');
+    expect(task.attempts).toBe(1);
+    expect(task.title).toBe('新标题');
+    expect(task.error).toBeUndefined();
+  });
+
+  it('rejects selected validation-failed tasks', () => {
+    const batch = makeBatch();
+
+    expect(() => startSelectedTasks(batch.id, [batch.tasks[2].id])).toThrow('没有可生成');
   });
 });
