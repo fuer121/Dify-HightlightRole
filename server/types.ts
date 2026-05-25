@@ -68,6 +68,7 @@ export interface Batch {
   sheetName: string;
   fileName: string;
   mapping: ColumnMapping;
+  rowLimit?: number;
   status: 'idle' | 'running' | 'paused' | 'completed';
   createdAt: string;
   updatedAt: string;

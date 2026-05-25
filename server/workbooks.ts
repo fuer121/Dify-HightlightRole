@@ -17,6 +17,20 @@ const normalizeHeader = (value: string) =>
     .replace(/\s+/g, '')
     .replace(/[_-]+/g, '');
 
+export function normalizeUploadFileName(fileName: string) {
+  const decoded = Buffer.from(fileName, 'latin1').toString('utf8');
+  const hasReplacementChar = decoded.includes('\uFFFD');
+  const originalHasCjk = /[\u3400-\u9fff]/.test(fileName);
+  const decodedHasCjk = /[\u3400-\u9fff]/.test(decoded);
+  const mojibakeMarkerCount = fileName.match(/[ÃÂâåæçèéäöü]/g)?.length ?? 0;
+
+  if (!hasReplacementChar && !originalHasCjk && decodedHasCjk && mojibakeMarkerCount >= 2) {
+    return decoded;
+  }
+
+  return fileName;
+}
+
 export function autoMapHeaders(headers: string[]): Partial<ColumnMapping> {
   const normalized = headers.map((header) => ({
     header,
@@ -95,7 +109,7 @@ export function parseWorkbook(buffer: Buffer, fileName: string): ParsedWorkbook 
 
   return {
     id: nanoid(),
-    fileName,
+    fileName: normalizeUploadFileName(fileName),
     sheets,
     createdAt: new Date().toISOString()
   };
@@ -125,7 +139,11 @@ function parseParagraph(value: unknown) {
   return text;
 }
 
-export function compileRows(sheet: ParsedSheet, mapping: ColumnMapping) {
+interface CompileRowsOptions {
+  rowLimit?: number;
+}
+
+export function compileRows(sheet: ParsedSheet, mapping: ColumnMapping, options: CompileRowsOptions = {}) {
   const missing = REQUIRED_KEYS.filter((key) => !mapping[key] || !sheet.headers.includes(mapping[key]));
   if (missing.length > 0) {
     throw new Error(`字段映射缺失：${missing.join(', ')}`);
@@ -133,6 +151,7 @@ export function compileRows(sheet: ParsedSheet, mapping: ColumnMapping) {
 
   return sheet.rows
     .filter((row) => sheet.headers.some((header) => String(row[header] ?? '').trim() !== ''))
+    .slice(0, options.rowLimit)
     .map((row) => {
       const rowNo = Number(row.__row_no ?? 0);
       try {

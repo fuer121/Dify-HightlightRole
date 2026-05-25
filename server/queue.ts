@@ -75,19 +75,27 @@ export function getBatch(batchId: string) {
   return batches.get(batchId);
 }
 
-export function createBatch(workbook: ParsedWorkbook, sheetName: string, mapping: ColumnMapping) {
+interface CreateBatchOptions {
+  rowLimit?: number;
+}
+
+export function createBatch(workbook: ParsedWorkbook, sheetName: string, mapping: ColumnMapping, options: CreateBatchOptions = {}) {
   const sheet = workbook.sheets.find((item) => item.name === sheetName);
   if (!sheet) {
     throw new Error(`找不到工作表：${sheetName}`);
   }
+  if (options.rowLimit !== undefined && options.rowLimit > sheet.rowCount) {
+    throw new Error(`入队行数不能超过当前工作表 ${sheet.rowCount} 行`);
+  }
 
-  const compiledRows = compileRows(sheet, mapping);
+  const compiledRows = compileRows(sheet, mapping, { rowLimit: options.rowLimit });
   const batch: Batch = {
     id: nanoid(),
     workbookId: workbook.id,
     sheetName,
     fileName: workbook.fileName,
     mapping,
+    rowLimit: options.rowLimit,
     status: 'idle',
     createdAt: now(),
     updatedAt: now(),
@@ -116,17 +124,17 @@ export function createBatch(workbook: ParsedWorkbook, sheetName: string, mapping
     events: []
   };
 
-  addEvent(batch, 'info', `已创建批次，共 ${batch.tasks.length} 行`);
+  addEvent(batch, 'info', `已创建批次，共 ${batch.tasks.length} 行${options.rowLimit ? `，限制前 ${options.rowLimit} 行` : ''}`);
   batches.set(batch.id, batch);
   return batch;
 }
 
-function hasPendingTasks(batch: Batch) {
-  return batch.tasks.some((task) => task.status === 'queued' || task.status === 'paused');
+function hasPendingTasks(batch: Batch, scope?: Set<string>) {
+  return batch.tasks.some((task) => (!scope || scope.has(task.id)) && (task.status === 'queued' || task.status === 'paused'));
 }
 
-function nextQueuedTask(batch: Batch) {
-  return batch.tasks.find((task) => task.status === 'queued');
+function nextQueuedTask(batch: Batch, scope?: Set<string>) {
+  return batch.tasks.find((task) => (!scope || scope.has(task.id)) && task.status === 'queued');
 }
 
 function completeIfDone(batch: Batch) {
@@ -245,26 +253,30 @@ async function runTask(batch: Batch, task: BatchTask) {
   }
 }
 
-async function runBatchLoop(batch: Batch) {
+function hasAnyUnfinishedWork(batch: Batch) {
+  return batch.tasks.some((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused');
+}
+
+async function runBatchLoop(batch: Batch, scopedTaskIds?: Set<string>) {
   if (batch.status === 'running') return;
   batch.status = 'running';
   batch.pauseRequested = false;
   batch.startedAt = batch.startedAt ?? now();
   batch.finishedAt = undefined;
   batch.tasks.forEach((task) => {
-    if (task.status === 'paused' && task.pause_reason === 'batch') {
+    if ((!scopedTaskIds || scopedTaskIds.has(task.id)) && task.status === 'paused' && task.pause_reason === 'batch') {
       task.status = 'queued';
       task.pause_reason = undefined;
       task.progress_label = '等待执行';
     }
   });
-  addEvent(batch, 'info', '开始串行执行队列');
+  addEvent(batch, 'info', scopedTaskIds ? `开始生成选中任务，共 ${scopedTaskIds.size} 个` : '开始串行执行队列');
   emit(batch);
 
-  while (hasPendingTasks(batch)) {
+  while (hasPendingTasks(batch, scopedTaskIds)) {
     if (batch.pauseRequested) {
       batch.tasks.forEach((task) => {
-        if (task.status === 'queued') {
+        if ((!scopedTaskIds || scopedTaskIds.has(task.id)) && task.status === 'queued') {
           task.status = 'paused';
           task.pause_reason = 'batch';
         }
@@ -275,9 +287,17 @@ async function runBatchLoop(batch: Batch) {
       return;
     }
 
-    const task = nextQueuedTask(batch);
+    const task = nextQueuedTask(batch, scopedTaskIds);
     if (!task) break;
     await runTask(batch, task);
+  }
+
+  if (scopedTaskIds && hasAnyUnfinishedWork(batch)) {
+    batch.status = 'idle';
+    batch.finishedAt = undefined;
+    addEvent(batch, 'info', '选中任务生成完成，仍有未执行任务');
+    emit(batch);
+    return;
   }
 
   completeIfDone(batch);
@@ -288,6 +308,46 @@ export function startBatch(batchId: string) {
   const batch = batches.get(batchId);
   if (!batch) throw new Error('批次不存在');
   void runBatchLoop(batch);
+  return batch;
+}
+
+export function startSelectedTasks(batchId: string, taskIds: string[]) {
+  const batch = batches.get(batchId);
+  if (!batch) throw new Error('批次不存在');
+  if (batch.status === 'running') throw new Error('批次执行中，不能启动选中任务');
+
+  const selectedIds = Array.from(new Set(taskIds));
+  const runnableIds = new Set<string>();
+  let skipped = 0;
+  for (const taskId of selectedIds) {
+    const task = batch.tasks.find((item) => item.id === taskId);
+    if (!task) {
+      skipped += 1;
+      continue;
+    }
+    if (task.status === 'running' || isValidationFailed(task)) {
+      skipped += 1;
+      continue;
+    }
+    if (task.status === 'failed' || task.status === 'paused' || task.status === 'succeeded') {
+      resetTaskForRetry(task);
+    }
+    if (task.status === 'queued') {
+      task.progress_label = task.progress_label ?? '等待执行';
+      runnableIds.add(task.id);
+    }
+  }
+
+  if (runnableIds.size === 0) {
+    addEvent(batch, 'info', `没有可生成的选中任务，已跳过 ${skipped} 个`);
+    emit(batch);
+    throw new Error('没有可生成的选中任务');
+  }
+
+  batch.finishedAt = undefined;
+  addEvent(batch, 'info', `已选择 ${runnableIds.size} 个任务生成${skipped > 0 ? `，跳过 ${skipped} 个不可生成任务` : ''}`);
+  emit(batch);
+  void runBatchLoop(batch, runnableIds);
   return batch;
 }
 
