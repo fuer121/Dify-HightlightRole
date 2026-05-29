@@ -1,5 +1,5 @@
 import type { BatchTask, DifyRunResult, ResultFile } from './types.js';
-import { registerBase64File, registerRemoteFile } from './fileStore.js';
+import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
 
 interface DifyErrorOptions {
   retryable?: boolean;
@@ -410,7 +410,29 @@ async function normalizeFileValue(taskId: string, value: unknown): Promise<Resul
 
 export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
   const outputs = result.outputs ?? {};
-  const files = await normalizeFileValue(task.id, outputs.result);
+  const fileValues = [
+    outputs.result,
+    outputs.result_files,
+    outputs.files,
+    outputs.file,
+    outputs.image,
+    outputs.images,
+    outputs.image_url,
+    outputs.image_urls,
+    outputs.url
+  ];
+  const files = (await Promise.all(fileValues.map((value) => normalizeFileValue(task.id, value)))).flat();
+  const downloadErrors: string[] = [];
+  for (const file of files) {
+    if (file.sourceKind === 'remote') {
+      try {
+        await ensureLocalFile(file);
+      } catch (error) {
+        downloadErrors.push(error instanceof Error ? error.message : '图片下载失败');
+      }
+    }
+  }
+  const availableFiles = files.filter((file) => file.sourceKind !== 'remote' || file.localPath);
   task.workflow_run_id = result.workflowRunId;
   task.dify_task_id = result.taskId ?? task.dify_task_id;
   task.progress_percent = 100;
@@ -419,11 +441,14 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
   task.paragraph_description = outputString(outputs.paragraph_description) ?? outputString(outputs.description) ?? task.paragraph_description;
   task.role = toStringArray(outputs.role);
   task.title = outputString(outputs.title);
-  task.result_files = files;
+  task.result_files = availableFiles;
   task.result_text =
     outputString(outputs.result_text) ??
     outputString(outputs.markdown_output) ??
-    (files.length === 0 ? outputString(outputs.result) : undefined);
+    (availableFiles.length === 0 ? outputString(outputs.result) ?? outputString(outputs.image_url) ?? outputString(outputs.url) : undefined);
+  if (downloadErrors.length > 0 && availableFiles.length === 0) {
+    task.error = `图片下载失败：${downloadErrors.join('；')}`;
+  }
   task.raw_outputs = outputs;
 }
 

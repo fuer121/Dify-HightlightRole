@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
+  BookOpen,
   CheckCircle2,
   CheckSquare,
   ChevronDown,
@@ -12,6 +13,7 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Pause,
   Play,
   RefreshCw,
@@ -26,9 +28,21 @@ type RequiredInputKey = 'book_id' | 'paragraph_content' | 'chapter_sort';
 type Mapping = Record<RequiredInputKey, string>;
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused';
 type StatusFilter = TaskStatus | 'all';
-type AppPage = 'batch' | 'quality';
+type AppPage = 'books' | 'quality';
+type ImagePresenceFilter = 'all' | 'yes' | 'no';
+type ValueStatusFilter = 'all' | 'valuable' | 'not_valuable' | 'unknown';
+type RangeFilterMode = 'chapter' | 'row';
+type TaskPageSize = 20 | 50 | 200;
+type BookTaskColumnKey = 'status' | 'image' | 'source' | 'is_valid' | 'paragraph' | 'result' | 'actions';
+type BookTaskColumnWidths = Record<BookTaskColumnKey, number>;
 type ImageValue = '有价值' | '无价值';
 type QualityRunStatus = 'idle' | 'running' | 'completed' | 'failed';
+type TaskQueryOverrides = Partial<RangeFilterState> & {
+  statusFilter?: StatusFilter;
+  taskQuery?: string;
+  hasImage?: ImagePresenceFilter;
+  valueStatus?: ValueStatusFilter;
+};
 
 interface ParsedSheet {
   name: string;
@@ -57,6 +71,8 @@ interface ResultFile {
 
 interface BatchTask {
   id: string;
+  batch_id?: string;
+  source_kind?: string;
   row_no: number;
   input: {
     book_id: number;
@@ -82,6 +98,68 @@ interface BatchTask {
   result_text?: string;
   raw_outputs?: unknown;
   error?: string;
+}
+
+interface BookSummary {
+  book_id: number;
+  name?: string;
+  task_count: number;
+  queued_count: number;
+  running_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  paused_count: number;
+  unfinished_count: number;
+  last_task_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BookBatchSummary {
+  id: string;
+  file_name: string;
+  sheet_name: string;
+  status: Batch['status'];
+  created_at: string;
+  updated_at: string;
+  task_count: number;
+  queued_count: number;
+  running_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  paused_count: number;
+  unfinished_count: number;
+}
+
+interface TaskRunRecord {
+  id: string;
+  task_id: string;
+  attempt_no: number;
+  status: TaskStatus;
+  started_at?: string;
+  finished_at?: string;
+  elapsed_seconds?: number;
+  workflow_run_id?: string;
+  dify_task_id?: string;
+  result_files: ResultFile[];
+  result_text?: string;
+  raw_outputs?: unknown;
+  error?: string;
+  created_at: string;
+}
+
+interface TaskPagination {
+  page: number;
+  pageSize: TaskPageSize;
+  total: number;
+  totalPages: number;
+  runnableTotal: number;
+}
+
+interface AppHealthConfig {
+  config?: {
+    difyWorkflowName?: string | null;
+  };
 }
 
 interface BatchEvent {
@@ -242,13 +320,75 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'paused', label: statusLabel.paused }
 ];
 
+const IMAGE_FILTER_OPTIONS: Array<{ value: ImagePresenceFilter; label: string }> = [
+  { value: 'all', label: '全部图片' },
+  { value: 'yes', label: '有图' },
+  { value: 'no', label: '无图' }
+];
+
+const VALUE_FILTER_OPTIONS: Array<{ value: ValueStatusFilter; label: string }> = [
+  { value: 'all', label: '全部价值' },
+  { value: 'valuable', label: '有价值' },
+  { value: 'not_valuable', label: '无价值' },
+  { value: 'unknown', label: '未知' }
+];
+
+const TASK_PAGE_SIZE_OPTIONS: TaskPageSize[] = [20, 50, 200];
+const DEFAULT_RANGE_FILTER_STATE = {
+  mode: 'chapter' as RangeFilterMode,
+  chapterFrom: '',
+  chapterTo: '',
+  rowNoFrom: '',
+  rowNoTo: ''
+};
+
+function taskListPageSize(taskCount?: number): TaskPageSize {
+  return taskCount && taskCount <= 200 ? 200 : 50;
+}
+
+type RangeFilterState = typeof DEFAULT_RANGE_FILTER_STATE;
+
+const qualityStatusLabel: Record<QualityRunStatus, string> = {
+  idle: '待执行',
+  running: '执行中',
+  completed: '已完成',
+  failed: '失败'
+};
+
+const BOOK_TASK_TABLE_WIDTHS_KEY = 'dify-books:task-table-column-widths';
+const BOOK_TASK_COLUMN_CONFIG: Array<{ key: BookTaskColumnKey; label: string; defaultWidth: number; minWidth: number; maxWidth: number }> = [
+  { key: 'status', label: '状态', defaultWidth: 116, minWidth: 92, maxWidth: 180 },
+  { key: 'image', label: '图片', defaultWidth: 92, minWidth: 70, maxWidth: 150 },
+  { key: 'source', label: '来源', defaultWidth: 150, minWidth: 112, maxWidth: 240 },
+  { key: 'is_valid', label: 'is_valid', defaultWidth: 96, minWidth: 80, maxWidth: 160 },
+  { key: 'paragraph', label: '段落内容', defaultWidth: 300, minWidth: 180, maxWidth: 760 },
+  { key: 'result', label: '结果', defaultWidth: 180, minWidth: 128, maxWidth: 360 },
+  { key: 'actions', label: '操作', defaultWidth: 126, minWidth: 104, maxWidth: 180 }
+];
+
+const DEFAULT_BOOK_TASK_COLUMN_WIDTHS = BOOK_TASK_COLUMN_CONFIG.reduce((widths, column) => {
+  widths[column.key] = column.defaultWidth;
+  return widths;
+}, {} as BookTaskColumnWidths);
+
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => ({}));
+  const contentType = response.headers.get('content-type') ?? '';
+  const payload = contentType.includes('application/json') ? await response.json().catch(() => ({})) : {};
+  const fallbackText = contentType.includes('application/json') ? '' : await response.text().catch(() => '');
   if (!response.ok) {
-    const message = typeof payload.error === 'string' ? payload.error : `请求失败：${response.status}`;
+    const message =
+      typeof payload.error === 'string'
+        ? payload.error
+        : fallbackText.trim()
+          ? `请求失败：${response.status} ${fallbackText.trim()}`
+          : `请求失败：${response.status}`;
     throw new Error(message);
   }
   return payload as T;
+}
+
+function isNetworkFetchError(error: unknown) {
+  return error instanceof TypeError && error.message.toLowerCase().includes('fetch');
 }
 
 function truncate(text: string, length = 120) {
@@ -290,15 +430,116 @@ function normalizeDisplayFileName(fileName: string) {
   }
 }
 
+function formatQualityTaskName(fileName: string, duplicateIndex?: number) {
+  const displayName = normalizeDisplayFileName(fileName);
+  return duplicateIndex ? `${displayName}（${duplicateIndex}）` : displayName;
+}
+
+function buildQualityTaskItems(experiments: QualityExperimentSummary[]) {
+  const normalizedCounts = experiments.reduce((counts, item) => {
+    const name = normalizeDisplayFileName(item.fileName);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  const ordersByName = new Map<string, number>();
+  const duplicateOrder = [...experiments]
+    .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+    .reduce((orders, item) => {
+      const name = normalizeDisplayFileName(item.fileName);
+      if ((normalizedCounts.get(name) ?? 0) <= 1) return orders;
+      orders.set(item.id, (ordersByName.get(name) ?? 0) + 1);
+      ordersByName.set(name, orders.get(item.id) ?? 1);
+      return orders;
+    }, new Map<string, number>());
+
+  return experiments.map((item) => ({
+    ...item,
+    taskName: formatQualityTaskName(item.fileName, duplicateOrder.get(item.id))
+  }));
+}
+
+function formatCompactDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString([], {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function formatElapsedFrom(value?: string) {
+  if (!value) return '';
+  const started = new Date(value).getTime();
+  if (!Number.isFinite(started)) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${restSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function clampColumnWidth(columnKey: BookTaskColumnKey, width: number) {
+  const config = BOOK_TASK_COLUMN_CONFIG.find((column) => column.key === columnKey);
+  const minWidth = config?.minWidth ?? 80;
+  const maxWidth = config?.maxWidth ?? 760;
+  return Math.round(Math.min(maxWidth, Math.max(minWidth, width)));
+}
+
+function loadBookTaskColumnWidths(): BookTaskColumnWidths {
+  if (typeof window === 'undefined') return { ...DEFAULT_BOOK_TASK_COLUMN_WIDTHS };
+  try {
+    const raw = window.localStorage.getItem(BOOK_TASK_TABLE_WIDTHS_KEY);
+    if (!raw) return { ...DEFAULT_BOOK_TASK_COLUMN_WIDTHS };
+    const parsed = JSON.parse(raw) as Partial<Record<BookTaskColumnKey, unknown>>;
+    return BOOK_TASK_COLUMN_CONFIG.reduce((widths, column) => {
+      const value = parsed[column.key];
+      widths[column.key] =
+        typeof value === 'number' && Number.isFinite(value)
+          ? clampColumnWidth(column.key, value)
+          : column.defaultWidth;
+      return widths;
+    }, {} as BookTaskColumnWidths);
+  } catch {
+    return { ...DEFAULT_BOOK_TASK_COLUMN_WIDTHS };
+  }
+}
+
+function saveBookTaskColumnWidths(widths: BookTaskColumnWidths) {
+  try {
+    window.localStorage?.setItem(BOOK_TASK_TABLE_WIDTHS_KEY, JSON.stringify(widths));
+  } catch {
+    // Some embedded browser contexts can block localStorage; resizing should still work for the current session.
+  }
+}
+
 export function App() {
-  const initialPage = new URLSearchParams(window.location.search).get('page') === 'quality' ? 'quality' : 'batch';
+  const initialPageParam = new URLSearchParams(window.location.search).get('page');
+  const initialPage: AppPage = initialPageParam === 'quality' ? 'quality' : 'books';
   const [page, setPage] = useState<AppPage>(initialPage);
+  const [difyWorkflowName, setDifyWorkflowName] = useState('LL-段落高光生图-效果测试');
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then((response) => readJson<AppHealthConfig>(response))
+      .then((payload) => {
+        if (payload.config?.difyWorkflowName) {
+          setDifyWorkflowName(payload.config.difyWorkflowName);
+        }
+      })
+      .catch(() => {
+        setDifyWorkflowName('LL-段落高光生图-效果测试');
+      });
+  }, []);
 
   function updatePage(nextPage: AppPage) {
     setPage(nextPage);
     const url = new URL(window.location.href);
     if (nextPage === 'quality') {
-      url.searchParams.set('page', 'quality');
+      url.searchParams.set('page', nextPage);
     } else {
       url.searchParams.delete('page');
     }
@@ -306,35 +547,77 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <AppNav page={page} onChange={updatePage} />
-      {page === 'quality' ? <QualityPromptPage /> : <BatchWorkflowPage />}
+    <main className="app-shell side-shell">
+      {page === 'quality' ? (
+        <QualityWorkspace onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
+      ) : (
+        <BooksManagementPage page={page} onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
+      )}
     </main>
   );
 }
 
-function AppNav({ page, onChange }: { page: AppPage; onChange: (page: AppPage) => void }) {
+function WorkspaceSidebar({
+  page,
+  onChange,
+  difyWorkflowName,
+  bookDirectory,
+  children
+}: {
+  page: AppPage;
+  onChange: (page: AppPage) => void;
+  difyWorkflowName: string;
+  bookDirectory?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
-    <nav className="app-nav">
-      <div>
-        <strong>Dify Excel 工具台</strong>
-        <span>批量生图与质量判断 Prompt 优化</span>
+    <aside className="workspace-sidebar">
+      <div className="sidebar-brand">
+        <div className="brand-mark">D</div>
+        <div>
+          <strong>Dify 书籍库</strong>
+          <span>高光段落生图工作台</span>
+        </div>
       </div>
-      <div className="nav-tabs">
-        <button className={page === 'batch' ? 'active' : ''} onClick={() => onChange('batch')}>
-          <ImageIcon size={16} />
-          批量生图
-        </button>
+      <nav className="sidebar-nav">
+        <div className="sidebar-nav-group">
+          <button className={page === 'books' ? 'active' : ''} onClick={() => onChange('books')}>
+            <BookOpen size={16} />
+            书籍库
+          </button>
+          {bookDirectory}
+        </div>
         <button className={page === 'quality' ? 'active' : ''} onClick={() => onChange('quality')}>
           <SlidersHorizontal size={16} />
           质量判断
         </button>
+      </nav>
+      {children}
+      <div className="sidebar-workflow-info" aria-label="当前 Dify 工作流">
+        <span>Dify 工作流</span>
+        <strong title={difyWorkflowName}>{difyWorkflowName}</strong>
       </div>
-    </nav>
+    </aside>
   );
 }
 
-function BatchWorkflowPage() {
+function QualityWorkspace({ onNavigate, difyWorkflowName }: { onNavigate: (page: AppPage) => void; difyWorkflowName: string }) {
+  return (
+    <div className="workspace-frame">
+      <WorkspaceSidebar page="quality" onChange={onNavigate} difyWorkflowName={difyWorkflowName}>
+        <div className="sidebar-note">
+          <Sparkles size={16} />
+          <span>质量判断保留为辅助工具，生图任务仍在书籍库中管理。</span>
+        </div>
+      </WorkspaceSidebar>
+      <section className="workspace-content quality-workspace-content">
+        <QualityPromptPage />
+      </section>
+    </div>
+  );
+}
+
+export function BatchWorkflowPage() {
   const [workbook, setWorkbook] = useState<ParsedWorkbook | null>(null);
   const [selectedSheetName, setSelectedSheetName] = useState('');
   const [mapping, setMapping] = useState<Partial<Mapping>>({});
@@ -515,7 +798,7 @@ function BatchWorkflowPage() {
       setSelectedTaskIds(new Set());
       setSetupPanelOpen(false);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : '创建批次失败');
+      setError(createError instanceof Error ? createError.message : '创建任务清单失败');
     } finally {
       setCreating(false);
     }
@@ -582,6 +865,18 @@ function BatchWorkflowPage() {
       }).then((response) => readJson<LarkExportResult>(response));
       setBatch({ ...batch, export: result });
     } catch (exportError) {
+      if (isNetworkFetchError(exportError)) {
+        const refreshedBatch = await fetch(`/api/batches/${batch.id}`)
+          .then((response) => readJson<Batch>(response))
+          .catch(() => undefined);
+        if (refreshedBatch?.export) {
+          setBatch(refreshedBatch);
+          setError(null);
+          return;
+        }
+        setError('导出请求连接中断，请确认本地后端服务正在运行后重试');
+        return;
+      }
       setError(exportError instanceof Error ? exportError.message : '导出飞书失败');
     } finally {
       setExporting(false);
@@ -672,7 +967,7 @@ function BatchWorkflowPage() {
                     <PanelLeftClose size={16} />
                   </button>
                 </div>
-                <p className="muted">上传、映射、编译和执行控制集中在这里；创建批次后会自动收起。</p>
+                <p className="muted">上传、映射、编译和执行控制集中在这里；创建任务清单后会自动收起。</p>
               </div>
 
               <div className="panel-section upload-card">
@@ -1023,10 +1318,7 @@ function BatchWorkflowPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="image-placeholder">
-                    <ImageIcon size={24} />
-                    暂无图片
-                  </div>
+                  <ImagePlaceholder task={selectedTask} />
                 )}
                 <div className="result-info">
                   <h2>{selectedTask.title || '暂无标题'}</h2>
@@ -1120,13 +1412,34 @@ function ProgressCell({ task, wide = false }: { task: BatchTask; wide?: boolean 
         ? 0
         : Math.max(0, Math.min(100, task.progress_percent ?? (task.status === 'running' ? 8 : 0)));
   const label = task.progress_label ?? (task.status === 'running' ? '执行中' : statusLabel[task.status]);
+  const elapsed = task.status === 'running' ? formatElapsedFrom(task.started_at) : '';
 
   return (
     <div className={`progress-cell ${wide ? 'wide' : ''}`}>
       <div className="progress-track">
         <span style={{ width: `${percent}%` }} />
       </div>
-      <small>{label}</small>
+      <small>{elapsed ? `${label} · 已等待 ${elapsed}` : label}</small>
+    </div>
+  );
+}
+
+function ImagePlaceholder({ task }: { task: BatchTask }) {
+  if (task.status === 'running') {
+    return (
+      <div className="image-placeholder running">
+        <Loader2 className="spin" size={24} />
+        <strong>图片生成中</strong>
+        <span>{task.progress_label ?? '等待 Dify 返回最终图片'}{task.started_at ? ` · 已等待 ${formatElapsedFrom(task.started_at)}` : ''}</span>
+        {task.paragraph_description && <small>已生成段落描述，正在等待图片节点完成。</small>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="image-placeholder">
+      <ImageIcon size={24} />
+      暂无图片
     </div>
   );
 }
@@ -1146,20 +1459,1187 @@ function RawValue({ value, compact = false }: { value: unknown; compact?: boolea
 function TaskActions({ task, onAction }: { task: BatchTask; onAction: (action: 'pause' | 'retry' | 'delete') => void }) {
   const validationFailed = task.error?.startsWith('字段校验失败') ?? false;
   const canPause = task.status === 'queued' || task.status === 'running';
-  const canRetry = ['failed', 'paused', 'succeeded'].includes(task.status) && !validationFailed;
+  const canRetry = ['failed', 'paused', 'succeeded'].includes(task.status) && !validationFailed && Boolean(task.batch_id);
   const deletingLabel = task.status === 'running' ? '停止并删除' : '删除';
 
   return (
     <div className="task-actions" onClick={(event) => event.stopPropagation()}>
-      <button title="暂停任务" disabled={!canPause} onClick={() => onAction('pause')}>
+      <button aria-label={`暂停第 ${task.row_no} 行任务`} title="暂停任务" disabled={!canPause} onClick={() => onAction('pause')}>
         <Pause size={14} />
       </button>
-      <button title="重试任务" disabled={!canRetry} onClick={() => onAction('retry')}>
+      <button
+        aria-label={`重试第 ${task.row_no} 行任务`}
+        title={task.batch_id ? '重试任务' : '没有来源文档任务清单，不能重新生图'}
+        disabled={!canRetry}
+        onClick={() => onAction('retry')}
+      >
         <RefreshCw size={14} />
       </button>
-      <button title={deletingLabel} onClick={() => onAction('delete')}>
+      <button aria-label={`${deletingLabel}第 ${task.row_no} 行任务`} title={deletingLabel} onClick={() => onAction('delete')}>
         <Trash2 size={14} />
       </button>
+    </div>
+  );
+}
+
+function ResizableTableHeader({
+  column,
+  onResizeStart
+}: {
+  column: (typeof BOOK_TASK_COLUMN_CONFIG)[number];
+  onResizeStart: (columnKey: BookTaskColumnKey, clientX: number, target: HTMLButtonElement, pointerId?: number) => void;
+}) {
+  return (
+    <th className="resizable-th" scope="col">
+      <span>{column.label}</span>
+      <button
+        aria-label={`调整${column.label}列宽`}
+        className="column-resizer"
+        title="拖动调整列宽"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onResizeStart(column.key, event.clientX, event.currentTarget, event.pointerId);
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onResizeStart(column.key, event.clientX, event.currentTarget);
+        }}
+      />
+    </th>
+  );
+}
+
+function BooksManagementPage({
+  page,
+  onNavigate,
+  difyWorkflowName
+}: {
+  page: AppPage;
+  onNavigate: (page: AppPage) => void;
+  difyWorkflowName: string;
+}) {
+  const [books, setBooks] = useState<BookSummary[]>([]);
+  const [selectedBookId, setSelectedBookId] = useState<number | null>(null);
+  const [batches, setBatches] = useState<BookBatchSummary[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState('all');
+  const [tasks, setTasks] = useState<BatchTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [runs, setRuns] = useState<TaskRunRecord[]>([]);
+  const [taskQuery, setTaskQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [chapterFrom, setChapterFrom] = useState('');
+  const [chapterTo, setChapterTo] = useState('');
+  const [hasImage, setHasImage] = useState<ImagePresenceFilter>('all');
+  const [valueStatus, setValueStatus] = useState<ValueStatusFilter>('all');
+  const [rangeFilterMode, setRangeFilterMode] = useState<RangeFilterMode>('chapter');
+  const [isRangeFilterOpen, setRangeFilterOpen] = useState(false);
+  const [rowNoFrom, setRowNoFrom] = useState('');
+  const [rowNoTo, setRowNoTo] = useState('');
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskPageSize, setTaskPageSize] = useState<TaskPageSize>(50);
+  const [taskPagination, setTaskPagination] = useState<TaskPagination>({
+    page: 1,
+    pageSize: 50,
+    total: 0,
+    totalPages: 1,
+    runnableTotal: 0
+  });
+  const [isLoadingTasks, setLoadingTasks] = useState(false);
+  const [isContinuing, setContinuing] = useState(false);
+  const [isRunLogOpen, setRunLogOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lightboxFile, setLightboxFile] = useState<ResultFile | null>(null);
+  const [isUploading, setUploading] = useState(false);
+  const [isExporting, setExporting] = useState(false);
+  const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
+  const [editingBatchName, setEditingBatchName] = useState('');
+  const [savingBatchNameId, setSavingBatchNameId] = useState<string | null>(null);
+  const [recentImportedBookIds, setRecentImportedBookIds] = useState<number[]>([]);
+  const [taskColumnWidths, setTaskColumnWidths] = useState<BookTaskColumnWidths>(() => loadBookTaskColumnWidths());
+  const taskColumnWidthsRef = useRef(taskColumnWidths);
+  const activeColumnResizeRef = useRef<BookTaskColumnKey | null>(null);
+  const batchUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const rangeFilterRef = useRef<HTMLDivElement | null>(null);
+  const rangeFilterByTaskListRef = useRef<Record<string, RangeFilterState>>({});
+
+  const selectedBook = useMemo(() => books.find((book) => book.book_id === selectedBookId) ?? books[0], [books, selectedBookId]);
+  const selectedTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks.find((task) => task.result_files.length > 0) ?? tasks[0],
+    [selectedTaskId, tasks]
+  );
+  const selectedBatch = useMemo(() => batches.find((batch) => batch.id === selectedBatchId), [batches, selectedBatchId]);
+  const isAllTaskListView = selectedBatchId === 'all';
+  const runningTask = useMemo(() => tasks.find((task) => task.status === 'running'), [tasks]);
+  const selectedBatchIsRunning = selectedBatch?.status === 'running' || Boolean(runningTask);
+  const rangeFilterSummary = useMemo(() => {
+    if (rangeFilterMode === 'chapter') {
+      if (!chapterFrom.trim() && !chapterTo.trim()) return '按章节';
+      return `章节 ${chapterFrom.trim() || '-'}-${chapterTo.trim() || '-'}`;
+    }
+    if (!rowNoFrom.trim() && !rowNoTo.trim()) return '按行数';
+    return `行 ${rowNoFrom.trim() || '-'}-${rowNoTo.trim() || '-'}`;
+  }, [chapterFrom, chapterTo, rangeFilterMode, rowNoFrom, rowNoTo]);
+  const taskTableMinWidth = useMemo(
+    () => BOOK_TASK_COLUMN_CONFIG.reduce((total, column) => total + taskColumnWidths[column.key], 0),
+    [taskColumnWidths]
+  );
+
+  useEffect(() => {
+    taskColumnWidthsRef.current = taskColumnWidths;
+  }, [taskColumnWidths]);
+
+  useEffect(() => {
+    if (!isRangeFilterOpen) return;
+
+    function closeRangeFilterOnOutsideClick(event: Event) {
+      const target = event.target;
+      if (!(target instanceof Node) || rangeFilterRef.current?.contains(target)) return;
+      setRangeFilterOpen(false);
+    }
+
+    document.addEventListener('pointerdown', closeRangeFilterOnOutsideClick);
+    document.addEventListener('mousedown', closeRangeFilterOnOutsideClick);
+    document.addEventListener('click', closeRangeFilterOnOutsideClick);
+    return () => {
+      document.removeEventListener('pointerdown', closeRangeFilterOnOutsideClick);
+      document.removeEventListener('mousedown', closeRangeFilterOnOutsideClick);
+      document.removeEventListener('click', closeRangeFilterOnOutsideClick);
+    };
+  }, [isRangeFilterOpen]);
+
+  function rangeFilterScopeKey(bookId = selectedBook?.book_id, taskListId = selectedBatchId) {
+    return `${bookId ?? 'none'}:${taskListId}`;
+  }
+
+  function currentRangeFilterState(): RangeFilterState {
+    return {
+      mode: rangeFilterMode,
+      chapterFrom,
+      chapterTo,
+      rowNoFrom,
+      rowNoTo
+    };
+  }
+
+  function applyRangeFilterState(state: RangeFilterState = DEFAULT_RANGE_FILTER_STATE) {
+    setRangeFilterMode(state.mode);
+    setChapterFrom(state.chapterFrom);
+    setChapterTo(state.chapterTo);
+    setRowNoFrom(state.rowNoFrom);
+    setRowNoTo(state.rowNoTo);
+  }
+
+  function switchTaskScope(nextBookId = selectedBook?.book_id, nextTaskListId = selectedBatchId) {
+    rangeFilterByTaskListRef.current[rangeFilterScopeKey()] = currentRangeFilterState();
+    applyRangeFilterState(rangeFilterByTaskListRef.current[rangeFilterScopeKey(nextBookId, nextTaskListId)] ?? DEFAULT_RANGE_FILTER_STATE);
+    setRangeFilterOpen(false);
+  }
+
+  function pageSizeForScope(taskListId = selectedBatchId, book = selectedBook) {
+    if (taskListId === 'all') return taskListPageSize(book?.task_count);
+    return taskListPageSize(batches.find((batch) => batch.id === taskListId)?.task_count);
+  }
+
+  async function loadBooks(preferredBookId?: number) {
+    setError(null);
+    try {
+      const payload = await fetch('/api/books').then((response) => readJson<{ books: BookSummary[] }>(response));
+      setBooks(payload.books);
+      setSelectedBookId((current) => preferredBookId ?? (current && payload.books.some((book) => book.book_id === current) ? current : payload.books[0]?.book_id ?? null));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '加载书籍失败');
+    }
+  }
+
+  async function loadBookBatches(bookId = selectedBook?.book_id, preferredTaskListId?: string) {
+    if (!bookId) {
+      setBatches([]);
+      return;
+    }
+    const payload = await fetch(`/api/books/${bookId}/batches`).then((response) => readJson<{ batches: BookBatchSummary[] }>(response));
+    setBatches(payload.batches);
+    setSelectedBatchId((current) => {
+      if (preferredTaskListId && payload.batches.some((batch) => batch.id === preferredTaskListId)) return preferredTaskListId;
+      return current === 'all' || payload.batches.some((batch) => batch.id === current) ? current : 'all';
+    });
+  }
+
+  function taskQueryParams(page = taskPage, pageSize = taskPageSize, taskListId = selectedBatchId, overrides: TaskQueryOverrides = {}) {
+    const params = new URLSearchParams();
+    const nextStatusFilter = overrides.statusFilter ?? statusFilter;
+    const nextTaskQuery = overrides.taskQuery ?? taskQuery;
+    const nextRangeFilterMode = overrides.mode ?? rangeFilterMode;
+    const nextChapterFrom = overrides.chapterFrom ?? chapterFrom;
+    const nextChapterTo = overrides.chapterTo ?? chapterTo;
+    const nextRowNoFrom = overrides.rowNoFrom ?? rowNoFrom;
+    const nextRowNoTo = overrides.rowNoTo ?? rowNoTo;
+    const nextHasImage = overrides.hasImage ?? hasImage;
+    const nextValueStatus = overrides.valueStatus ?? valueStatus;
+
+    if (nextStatusFilter !== 'all') params.set('status', nextStatusFilter);
+    if (taskListId !== 'all') params.set('batchId', taskListId);
+    if (nextTaskQuery.trim()) params.set('q', nextTaskQuery.trim());
+    if (nextRangeFilterMode === 'chapter') {
+      if (nextChapterFrom.trim()) params.set('chapterSortFrom', nextChapterFrom.trim());
+      if (nextChapterTo.trim()) params.set('chapterSortTo', nextChapterTo.trim());
+    } else {
+      if (nextRowNoFrom.trim()) params.set('rowNoFrom', nextRowNoFrom.trim());
+      if (nextRowNoTo.trim()) params.set('rowNoTo', nextRowNoTo.trim());
+    }
+    if (nextHasImage !== 'all') params.set('hasImage', nextHasImage);
+    if (nextValueStatus !== 'all') params.set('valueStatus', nextValueStatus);
+    params.set('page', String(page));
+    params.set('pageSize', String(pageSize));
+    return params;
+  }
+
+  async function loadBookTasks(
+    bookId = selectedBook?.book_id,
+    page = taskPage,
+    taskListId = selectedBatchId,
+    overrides: TaskQueryOverrides = {},
+    pageSize = taskPageSize
+  ) {
+    if (!bookId) {
+      setTasks([]);
+      setTaskPagination({ page: 1, pageSize, total: 0, totalPages: 1, runnableTotal: 0 });
+      return;
+    }
+    setLoadingTasks(true);
+    setError(null);
+    try {
+      const params = taskQueryParams(page, pageSize, taskListId, overrides);
+      const payload = await fetch(`/api/books/${bookId}/tasks?${params.toString()}`).then((response) =>
+        readJson<{ tasks: BatchTask[]; pagination: TaskPagination }>(response)
+      );
+      setTasks(payload.tasks);
+      setTaskPagination(payload.pagination);
+      if (payload.pagination.page !== taskPage) {
+        setTaskPage(payload.pagination.page);
+      }
+      setSelectedTaskId((current) => (current && payload.tasks.some((task) => task.id === current) ? current : payload.tasks[0]?.id ?? null));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '加载任务失败');
+    } finally {
+      setLoadingTasks(false);
+    }
+  }
+
+  async function loadRuns(taskId = selectedTask?.id) {
+    if (!taskId) {
+      setRuns([]);
+      return;
+    }
+    try {
+      const payload = await fetch(`/api/tasks/${taskId}/runs`).then((response) => readJson<{ runs: TaskRunRecord[] }>(response));
+      setRuns(payload.runs);
+    } catch {
+      setRuns([]);
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadBooks();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const bookId = selectedBook?.book_id;
+    if (!bookId) return;
+    const timer = window.setTimeout(() => {
+      void loadBookBatches(bookId);
+      void loadBookTasks(bookId);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBook?.book_id, selectedBatchId, taskPage, taskPageSize]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRuns(selectedTask?.id);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTask?.id]);
+
+  useEffect(() => {
+    if (selectedBatchId === 'all') return undefined;
+    const source = new EventSource(`/api/batches/${selectedBatchId}/events`);
+    source.onmessage = (event) => {
+      const nextBatch = JSON.parse(event.data) as Batch;
+      if (!selectedBook?.book_id) return;
+      setBatches((current) =>
+        current.map((batch) =>
+          batch.id === nextBatch.id
+            ? {
+                ...batch,
+                status: nextBatch.status,
+                updated_at: nextBatch.updatedAt,
+                task_count: nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id).length,
+                queued_count: nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id && task.status === 'queued').length,
+                running_count: nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id && task.status === 'running').length,
+                succeeded_count: nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id && task.status === 'succeeded').length,
+                failed_count: nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id && task.status === 'failed').length,
+                paused_count: nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id && task.status === 'paused').length,
+                unfinished_count: nextBatch.tasks.filter(
+                  (task) => task.input.book_id === selectedBook.book_id && ['queued', 'running', 'failed', 'paused'].includes(task.status)
+                ).length
+              }
+            : batch
+        )
+      );
+      setTasks((current) => {
+        const updates = new Map(nextBatch.tasks.filter((task) => task.input.book_id === selectedBook.book_id).map((task) => [task.id, task]));
+        return current.map((task) => updates.get(task.id) ?? task);
+      });
+    };
+    source.onerror = () => {
+      source.close();
+    };
+    return () => source.close();
+  }, [selectedBatchId, selectedBook?.book_id]);
+
+  useEffect(() => {
+    if (!selectedBook?.book_id || selectedBatchId === 'all' || !selectedBatchIsRunning) return undefined;
+    const timer = window.setInterval(() => {
+      void loadBookBatches(selectedBook.book_id);
+      void loadBookTasks(selectedBook.book_id, taskPage, selectedBatchId);
+    }, 5000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBook?.book_id, selectedBatchId, selectedBatchIsRunning, taskPage]);
+
+  async function searchTasks() {
+    setTaskPage(1);
+    await loadBookTasks(selectedBook?.book_id, 1);
+  }
+
+  async function applyRangeFilterSearch() {
+    setRangeFilterOpen(false);
+    setTaskPage(1);
+    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, currentRangeFilterState());
+  }
+
+  async function clearRangeFilterSearch() {
+    applyRangeFilterState(DEFAULT_RANGE_FILTER_STATE);
+    setRangeFilterOpen(false);
+    setTaskPage(1);
+    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, DEFAULT_RANGE_FILTER_STATE);
+  }
+
+  async function showRunningTasks() {
+    if (!selectedBook || selectedBatchId === 'all') return;
+    setStatusFilter('running');
+    applyRangeFilterState(DEFAULT_RANGE_FILTER_STATE);
+    setTaskQuery('');
+    setHasImage('all');
+    setValueStatus('all');
+    setTaskPage(1);
+    await loadBookTasks(selectedBook.book_id, 1, selectedBatchId, {
+      ...DEFAULT_RANGE_FILTER_STATE,
+      statusFilter: 'running',
+      taskQuery: '',
+      hasImage: 'all',
+      valueStatus: 'all'
+    });
+  }
+
+  async function uploadWorkbook(file: File) {
+    setError(null);
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const nextWorkbook = await fetch('/api/workbooks', {
+        method: 'POST',
+        body: form
+      }).then((response) => readJson<ParsedWorkbook>(response));
+      const firstSheet = nextWorkbook.sheets[0];
+      if (!firstSheet) {
+        throw new Error('未读取到可用工作表');
+      }
+      const mapping = firstSheet.autoMapping;
+      const missing = REQUIRED_FIELDS.filter((field) => !mapping[field.key]);
+      if (missing.length > 0) {
+        throw new Error(`自动识别字段失败：缺少 ${missing.map((item) => item.label).join('、')}，请检查 Excel 表头`);
+      }
+      const nextBatch = await fetch('/api/batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workbookId: nextWorkbook.id, sheetName: firstSheet.name, mapping })
+      }).then((response) => readJson<Batch>(response));
+      const bookIds = Array.from(new Set(nextBatch.tasks.map((task) => task.input.book_id).filter((value) => Number.isFinite(value)))).sort((a, b) => a - b);
+      const nextPageSize = taskListPageSize(nextBatch.tasks.filter((task) => task.input.book_id === bookIds[0]).length);
+      setRecentImportedBookIds(bookIds);
+      switchTaskScope(bookIds[0], nextBatch.id);
+      setSelectedBatchId(nextBatch.id);
+      setTaskPageSize(nextPageSize);
+      await loadBooks(bookIds[0]);
+      await loadBookBatches(bookIds[0], nextBatch.id);
+      await loadBookTasks(bookIds[0], 1, nextBatch.id, {}, nextPageSize);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '上传并编译失败');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function continueTasks() {
+    if (!selectedBook) return;
+    if (selectedBatchId === 'all') {
+      setError('请先选择一个上传文档任务清单后再执行生图');
+      return;
+    }
+    if (!selectedBatch) {
+      setError('当前任务清单不存在，请刷新后重试');
+      return;
+    }
+    if (selectedBatchIsRunning) {
+      setError(runningTask ? `当前任务清单正在执行中：第 ${runningTask.row_no} 行（${runningTask.progress_label ?? '执行中'}）` : '当前任务清单正在执行中');
+      return;
+    }
+    setContinuing(true);
+    setError(null);
+    try {
+      const params = taskQueryParams(1, taskPageSize, selectedBatchId);
+      params.delete('page');
+      params.delete('pageSize');
+      const query = params.toString();
+      const batch = await fetch(`/api/books/${selectedBook.book_id}/continue${query ? `?${query}` : ''}`, { method: 'POST' }).then((response) => readJson<Batch>(response));
+      const nextPageSize = taskListPageSize(batch.tasks.filter((task) => task.input.book_id === selectedBook.book_id).length);
+      setSelectedBatchId(batch.id);
+      setTaskPageSize(nextPageSize);
+      setTaskPage(1);
+      await loadBooks(selectedBook.book_id);
+      await loadBookBatches(selectedBook.book_id, batch.id);
+      await loadBookTasks(selectedBook.book_id, 1, batch.id, {}, nextPageSize);
+    } catch (continueError) {
+      setError(continueError instanceof Error ? continueError.message : '继续执行失败');
+    } finally {
+      setContinuing(false);
+    }
+  }
+
+  async function storedTaskAction(task: BatchTask, action: 'pause' | 'retry' | 'delete') {
+    setError(null);
+    try {
+      const method = action === 'delete' ? 'DELETE' : 'POST';
+      const suffix = action === 'delete' ? '' : `/${action}`;
+      const result = await fetch(`/api/tasks/${task.id}${suffix}`, { method }).then((response) => readJson<Batch | BatchTask>(response));
+      let nextTaskListId = selectedBatchId;
+      if ('tasks' in result) {
+        nextTaskListId = result.id;
+        if (result.id !== selectedBatchId) switchTaskScope(selectedBook?.book_id, result.id);
+        setSelectedBatchId(result.id);
+      }
+      const nextPageSize = 'tasks' in result ? taskListPageSize(result.tasks.filter((task) => task.input.book_id === selectedBook?.book_id).length) : taskPageSize;
+      await loadBooks(selectedBook?.book_id);
+      await loadBookBatches(selectedBook?.book_id, nextTaskListId);
+      await loadBookTasks(selectedBook?.book_id, taskPage, nextTaskListId, {}, nextPageSize);
+      await loadRuns(task.id);
+    } catch (taskError) {
+      setError(taskError instanceof Error ? taskError.message : '任务操作失败');
+    }
+  }
+
+  async function exportSelectedBatchToLark() {
+    if (!selectedBatch) return;
+    setError(null);
+    setExporting(true);
+    try {
+      await fetch(`/api/batches/${selectedBatch.id}/export/lark`, { method: 'POST' }).then((response) => readJson<LarkExportResult>(response));
+      await loadBookBatches(selectedBook?.book_id);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : '导出飞书失败');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function deleteSelectedBatch(batch: BookBatchSummary) {
+    if (!window.confirm(`确认删除任务清单「${normalizeDisplayFileName(batch.file_name)}」？该清单下的任务将从书籍任务列表中移除。`)) return;
+    setError(null);
+    setDeletingBatchId(batch.id);
+    try {
+      await fetch(`/api/batches/${batch.id}`, { method: 'DELETE' }).then((response) => readJson<{ ok: boolean }>(response));
+      const nextTaskListId = selectedBatchId === batch.id ? 'all' : selectedBatchId;
+      if (selectedBatchId === batch.id) {
+        switchTaskScope(selectedBook?.book_id, 'all');
+        setSelectedBatchId('all');
+        setTaskPageSize(taskListPageSize());
+      }
+      setSelectedTaskId(null);
+      await loadBooks(selectedBook?.book_id);
+      await loadBookBatches(selectedBook?.book_id, nextTaskListId);
+      await loadBookTasks(selectedBook?.book_id, taskPage, nextTaskListId, {}, nextTaskListId === 'all' ? taskListPageSize() : taskPageSize);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除任务清单失败');
+    } finally {
+      setDeletingBatchId(null);
+    }
+  }
+
+  async function saveBatchName(batch: BookBatchSummary) {
+    if (editingBatchId !== batch.id) return;
+    const nextName = editingBatchName.trim();
+    if (!nextName) {
+      setError('任务清单名称不能为空');
+      return;
+    }
+    setError(null);
+    setSavingBatchNameId(batch.id);
+    try {
+      await fetch(`/api/batches/${batch.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nextName })
+      }).then((response) => readJson<Batch>(response));
+      setBatches((current) => current.map((item) => (item.id === batch.id ? { ...item, file_name: nextName } : item)));
+      setEditingBatchId(null);
+      setEditingBatchName('');
+      await loadBookBatches(selectedBook?.book_id);
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : '修改任务清单名称失败');
+    } finally {
+      setSavingBatchNameId(null);
+    }
+  }
+
+  function startColumnResize(columnKey: BookTaskColumnKey, clientX: number, target: HTMLButtonElement, pointerId?: number) {
+    if (activeColumnResizeRef.current) return;
+    activeColumnResizeRef.current = columnKey;
+    if (pointerId !== undefined) {
+      target.setPointerCapture(pointerId);
+    }
+    const startX = clientX;
+    const startWidth = taskColumnWidthsRef.current[columnKey];
+
+    function updateWidth(nextClientX: number) {
+      const nextWidths = {
+        ...taskColumnWidthsRef.current,
+        [columnKey]: clampColumnWidth(columnKey, startWidth + nextClientX - startX)
+      };
+      taskColumnWidthsRef.current = nextWidths;
+      setTaskColumnWidths(nextWidths);
+      saveBookTaskColumnWidths(nextWidths);
+    }
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      updateWidth(moveEvent.clientX);
+    }
+
+    function handlePointerUp(upEvent: PointerEvent) {
+      updateWidth(upEvent.clientX);
+      activeColumnResizeRef.current = null;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      if (pointerId !== undefined && target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    }
+
+    function handleMouseMove(moveEvent: MouseEvent) {
+      updateWidth(moveEvent.clientX);
+    }
+
+    function handleMouseUp(upEvent: MouseEvent) {
+      updateWidth(upEvent.clientX);
+      activeColumnResizeRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    }
+
+    if (pointerId !== undefined) {
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+      window.addEventListener('pointercancel', handlePointerUp);
+    } else {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+  }
+
+  return (
+    <div className="workspace-frame book-workspace">
+      <WorkspaceSidebar
+        page={page}
+        onChange={onNavigate}
+        difyWorkflowName={difyWorkflowName}
+        bookDirectory={
+          <div className="sidebar-book-list">
+            {books.map((book) => (
+              <button
+                key={book.book_id}
+                className={selectedBook?.book_id === book.book_id ? 'active' : ''}
+                onClick={() => {
+                  const nextPageSize = taskListPageSize(book.task_count);
+                  if (selectedBook?.book_id !== book.book_id) switchTaskScope(book.book_id, 'all');
+                  setSelectedBookId(book.book_id);
+                  setSelectedBatchId('all');
+                  setTaskPageSize(nextPageSize);
+                  setSelectedTaskId(null);
+                  setTaskPage(1);
+                  void loadBookTasks(book.book_id, 1, 'all', {}, nextPageSize);
+                }}
+              >
+                <strong>{book.name || `书籍 ${book.book_id}`}</strong>
+                <span>{book.task_count} 任务 · {book.unfinished_count} 未完成</span>
+              </button>
+            ))}
+            {books.length === 0 && <p className="muted">还没有书籍，请先上传 Excel 创建任务清单。</p>}
+          </div>
+        }
+      />
+
+      <section className="workspace-content book-content">
+      {error && (
+        <section className="alert">
+          <AlertCircle size={18} />
+          <span>{error}</span>
+        </section>
+      )}
+
+      {recentImportedBookIds.length > 0 && (
+        <section className="imported-books-callout">
+          <CheckCircle2 size={18} />
+          <span>刚导入 {recentImportedBookIds.length} 本书：{recentImportedBookIds.join('、')}。可在左侧选择后命名。</span>
+          <button onClick={() => setRecentImportedBookIds([])}>知道了</button>
+        </section>
+      )}
+
+      <section className="batch-create-panel upload-compact-panel">
+        <input
+          ref={batchUploadInputRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadWorkbook(file);
+            event.currentTarget.value = '';
+          }}
+        />
+        <button className="secondary-action upload-only-action" onClick={() => batchUploadInputRef.current?.click()} disabled={isUploading}>
+          {isUploading ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
+          上传 Excel
+        </button>
+      </section>
+
+      {selectedBook ? (
+      <section className="books-layout book-main-grid">
+        <section className="books-main main-panel">
+          <div className="book-batch-strip">
+            <button
+              className={selectedBatchId === 'all' ? 'active' : ''}
+              onClick={() => {
+                if (selectedBatchId !== 'all') switchTaskScope(selectedBook?.book_id, 'all');
+                const nextPageSize = pageSizeForScope('all');
+                setSelectedBatchId('all');
+                setTaskPageSize(nextPageSize);
+                setTaskPage(1);
+                void loadBookTasks(selectedBook?.book_id, 1, 'all', {}, nextPageSize);
+              }}
+            >
+              全部任务
+              <span>{selectedBook.task_count} 条</span>
+            </button>
+            {batches.map((batch) => (
+              <div key={batch.id} className={`batch-chip ${selectedBatchId === batch.id ? 'active' : ''}`}>
+                {editingBatchId === batch.id ? (
+                  <div className="batch-chip-edit">
+                    <input
+                      autoFocus
+                      value={editingBatchName}
+                      disabled={savingBatchNameId === batch.id}
+                      onBlur={() => void saveBatchName(batch)}
+                      onChange={(event) => setEditingBatchName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur();
+                        }
+                        if (event.key === 'Escape') {
+                          setEditingBatchId(null);
+                          setEditingBatchName('');
+                        }
+                      }}
+                    />
+                    <span>{savingBatchNameId === batch.id ? '保存中' : '回车保存'}</span>
+                  </div>
+                ) : (
+                  <button
+                    className="batch-chip-main"
+                    onClick={() => {
+                      const nextPageSize = taskListPageSize(batch.task_count);
+                      if (selectedBatchId !== batch.id) switchTaskScope(selectedBook?.book_id, batch.id);
+                      setSelectedBatchId(batch.id);
+                      setTaskPageSize(nextPageSize);
+                      setTaskPage(1);
+                      void loadBookTasks(selectedBook?.book_id, 1, batch.id, {}, nextPageSize);
+                    }}
+                  >
+                    {normalizeDisplayFileName(batch.file_name)}
+                    <span>{batch.task_count} 条 · {batch.succeeded_count} 成功</span>
+                  </button>
+                )}
+                <button
+                  className="batch-chip-edit-button"
+                  title="修改任务清单名称"
+                  aria-label={`修改任务清单名称 ${normalizeDisplayFileName(batch.file_name)}`}
+                  disabled={savingBatchNameId === batch.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setEditingBatchId(batch.id);
+                    setEditingBatchName(normalizeDisplayFileName(batch.file_name));
+                  }}
+                >
+                  {savingBatchNameId === batch.id ? <Loader2 className="spin" size={13} /> : <Pencil size={13} />}
+                </button>
+                <button
+                  className="batch-chip-delete"
+                  title="删除任务清单"
+                  aria-label={`删除任务清单 ${normalizeDisplayFileName(batch.file_name)}`}
+                  disabled={deletingBatchId === batch.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void deleteSelectedBatch(batch);
+                  }}
+                >
+                  {deletingBatchId === batch.id ? <Loader2 className="spin" size={14} /> : <Trash2 size={14} />}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="task-list-head">
+            <div>
+              <strong>任务列表</strong>
+              <span>
+                当前页 {tasks.length} 条 / 共 {taskPagination.total} 条 · 可执行 {taskPagination.runnableTotal} 条
+                {selectedBatchId !== 'all' ? ' · 已选任务清单' : ' · 全部任务仅用于查询'}
+              </span>
+            </div>
+          </div>
+
+          {selectedBatchIsRunning && selectedBatchId !== 'all' && (
+            <div className="running-batch-notice">
+              <Loader2 className="spin" size={16} />
+              <span>
+                当前任务清单正在执行
+                {runningTask ? `：第 ${runningTask.row_no} 行（${runningTask.progress_label ?? '执行中'}）` : '，正在同步执行状态'}
+              </span>
+              <button
+                className="secondary-action"
+                onClick={() => void showRunningTasks()}
+              >
+                查看执行中
+              </button>
+            </div>
+          )}
+
+          <div className="task-toolbar book-task-toolbar book-filter-panel">
+            <label>
+              任务状态
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as StatusFilter);
+                  setTaskPage(1);
+                }}
+              >
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className={`range-filter ${isRangeFilterOpen ? 'open' : ''}`} ref={rangeFilterRef}>
+              <button className="range-filter-toggle" onClick={() => setRangeFilterOpen((current) => !current)} type="button">
+                范围
+                <span>{rangeFilterSummary}</span>
+                {isRangeFilterOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+              {isRangeFilterOpen && (
+                <div
+                  className="range-filter-popover"
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    void applyRangeFilterSearch();
+                  }}
+                >
+                  <label>
+                    筛选维度
+                    <select
+                      value={rangeFilterMode}
+                      onChange={(event) => {
+                        const nextMode = event.target.value as RangeFilterMode;
+                        setRangeFilterMode(nextMode);
+                        setTaskPage(1);
+                        if (nextMode === 'chapter') {
+                          setRowNoFrom('');
+                          setRowNoTo('');
+                        } else {
+                          setChapterFrom('');
+                          setChapterTo('');
+                        }
+                      }}
+                    >
+                      <option value="chapter">章节范围</option>
+                      <option value="row">行数范围</option>
+                    </select>
+                  </label>
+                  <div className="range-filter-fields">
+                    <label>
+                      {rangeFilterMode === 'chapter' ? '章节从' : '行数从'}
+                      <input
+                        value={rangeFilterMode === 'chapter' ? chapterFrom : rowNoFrom}
+                        onChange={(event) => {
+                          if (rangeFilterMode === 'chapter') {
+                            setChapterFrom(event.target.value);
+                          } else {
+                            setRowNoFrom(event.target.value);
+                          }
+                          setTaskPage(1);
+                        }}
+                        inputMode="numeric"
+                      />
+                    </label>
+                    <label>
+                      {rangeFilterMode === 'chapter' ? '章节到' : '行数到'}
+                      <input
+                        value={rangeFilterMode === 'chapter' ? chapterTo : rowNoTo}
+                        onChange={(event) => {
+                          if (rangeFilterMode === 'chapter') {
+                            setChapterTo(event.target.value);
+                          } else {
+                            setRowNoTo(event.target.value);
+                          }
+                          setTaskPage(1);
+                        }}
+                        inputMode="numeric"
+                      />
+                    </label>
+                  </div>
+                  <div className="range-filter-actions">
+                    <button className="secondary-action" type="button" onClick={() => void clearRangeFilterSearch()}>
+                      清空范围
+                    </button>
+                    <button className="generate-filter-button" type="button" onClick={() => void applyRangeFilterSearch()}>
+                      应用范围
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <label>
+              图片
+              <select
+                value={hasImage}
+                onChange={(event) => {
+                  setHasImage(event.target.value as ImagePresenceFilter);
+                  setTaskPage(1);
+                }}
+              >
+                {IMAGE_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              价值
+              <select
+                value={valueStatus}
+                onChange={(event) => {
+                  setValueStatus(event.target.value as ValueStatusFilter);
+                  setTaskPage(1);
+                }}
+              >
+                {VALUE_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              搜索任务
+              <input
+                value={taskQuery}
+                onChange={(event) => {
+                  setTaskQuery(event.target.value);
+                  setTaskPage(1);
+                }}
+                onKeyDown={(event) => event.key === 'Enter' && void searchTasks()}
+                placeholder="段落 / 标题 / 错误 / 章节"
+              />
+            </label>
+            <div className="filter-action-row">
+              <button className="generate-filter-button" onClick={() => void searchTasks()} disabled={!selectedBook || isLoadingTasks}>
+                {isLoadingTasks ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                查询
+              </button>
+              <button
+                className="continue-filter-button secondary-action"
+                onClick={() => void continueTasks()}
+                disabled={!selectedBook || !selectedBatch || isAllTaskListView || selectedBatchIsRunning || isContinuing || taskPagination.runnableTotal === 0}
+                title={
+                  !selectedBatch || isAllTaskListView
+                    ? '请先选择一个上传文档任务清单后再执行生图'
+                    : selectedBatchIsRunning
+                      ? '当前任务清单正在执行中'
+                      : undefined
+                }
+              >
+                {isContinuing ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                执行生图
+              </button>
+              <button
+                className="export-filter-button secondary-action"
+                onClick={() => void exportSelectedBatchToLark()}
+                disabled={!selectedBatch || isExporting}
+                title={!selectedBatch ? '请先选择一个上传文档任务清单后再导出' : undefined}
+              >
+                {isExporting ? <Loader2 className="spin" size={16} /> : <Database size={16} />}
+                导出飞书
+              </button>
+            </div>
+          </div>
+
+          <div className="task-table-wrap book-task-table-wrap">
+            <table className="task-table book-task-table" style={{ minWidth: taskTableMinWidth }}>
+              <colgroup>
+                {BOOK_TASK_COLUMN_CONFIG.map((column) => (
+                  <col key={column.key} style={{ width: taskColumnWidths[column.key] }} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  {BOOK_TASK_COLUMN_CONFIG.map((column) => (
+                    <ResizableTableHeader column={column} key={column.key} onResizeStart={startColumnResize} />
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task) => (
+                  <tr key={task.id} className={selectedTask?.id === task.id ? 'selected' : ''} onClick={() => setSelectedTaskId(task.id)}>
+                    <td>
+                      <span className={`status-pill ${task.status}`}>
+                        {statusIcon(task.status)}
+                        {statusLabel[task.status]}
+                      </span>
+                    </td>
+                    <td>
+                      {task.result_files[0] ? (
+                        <button
+                          className="thumb-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedTaskId(task.id);
+                            setLightboxFile(task.result_files[0]);
+                          }}
+                          title="查看大图"
+                        >
+                          <img src={absolutePreviewUrl(task.result_files[0].previewUrl)} alt={task.result_files[0].name} />
+                        </button>
+                      ) : (
+                        <span className="thumb-empty">-</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="source-cell">
+                        <strong>第 {task.row_no} 行</strong>
+                        <span>章 {task.input.chapter_sort || '-'} · {task.batch_id ? '文档' : '手动'}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <RawValue value={task.is_valid} />
+                    </td>
+                    <td className="paragraph-column">
+                      <div className="paragraph-cell">
+                        <p>{truncate(task.input.paragraph_content, 150)}</p>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="result-cell">
+                        <strong>{task.title || '暂无标题'}</strong>
+                        <span>{task.elapsed_seconds ? `${task.elapsed_seconds}s` : statusLabel[task.status]}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <TaskActions task={task} onAction={(action) => void storedTaskAction(task, action)} />
+                    </td>
+                  </tr>
+                ))}
+                {tasks.length === 0 && (
+                  <tr>
+                    <td className="table-empty" colSpan={7}>
+                      当前书籍没有匹配任务。
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="task-pagination">
+            <div className="pagination-summary">
+              第 {taskPagination.page} / {taskPagination.totalPages} 页
+            </div>
+            <label>
+              每页
+              <select
+                value={taskPageSize}
+                onChange={(event) => {
+                  const nextPageSize = Number(event.target.value) as TaskPageSize;
+                  setTaskPageSize(nextPageSize);
+                  setTaskPage(1);
+                }}
+              >
+                {TASK_PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option} 条
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="pagination-actions">
+              <button
+                className="secondary-action"
+                disabled={isLoadingTasks || taskPagination.page <= 1}
+                onClick={() => setTaskPage((current) => Math.max(1, current - 1))}
+              >
+                上一页
+              </button>
+              <button
+                className="secondary-action"
+                disabled={isLoadingTasks || taskPagination.page >= taskPagination.totalPages}
+                onClick={() => setTaskPage((current) => Math.min(taskPagination.totalPages, current + 1))}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <aside className="books-detail right-panel">
+          <div className="panel-section result-panel">
+            <div className="panel-heading">
+              <ImageIcon size={18} />
+              <span>任务详情</span>
+            </div>
+            {selectedTask ? (
+              <div className="result-body">
+                <div className="detail-task-head">
+                  <div>
+                    <div className={`status-pill ${selectedTask.status}`}>
+                      {statusIcon(selectedTask.status)}
+                      第 {selectedTask.row_no} 行 · {statusLabel[selectedTask.status]}
+                    </div>
+                    <small>
+                      章节 {selectedTask.input.chapter_sort || '-'} · {selectedTask.batch_id ? '文档任务' : '手动任务'}
+                    </small>
+                  </div>
+                  <TaskActions task={selectedTask} onAction={(action) => void storedTaskAction(selectedTask, action)} />
+                </div>
+                <ProgressCell task={selectedTask} wide />
+                {selectedTask.result_files.length > 0 ? (
+                  <div className="image-grid">
+                    {selectedTask.result_files.map((file) => (
+                      <button className="image-preview-button" onClick={() => setLightboxFile(file)} key={file.id}>
+                        <img src={absolutePreviewUrl(file.previewUrl)} alt={file.name} />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="image-placeholder">
+                    <ImageIcon size={24} />
+                    暂无图片
+                  </div>
+                )}
+                <div className="result-info">
+                  <h2>{selectedTask.title || '暂无标题'}</h2>
+                  <div className="result-meta">
+                    <span>
+                      is_valid：<RawValue value={selectedTask.is_valid} compact />
+                    </span>
+                    <span>角色：{selectedTask.role?.join('、') || '-'}</span>
+                    {selectedTask.elapsed_seconds ? <span>耗时：{selectedTask.elapsed_seconds}s</span> : null}
+                  </div>
+                </div>
+                {selectedTask.paragraph_description && (
+                  <div className="description-output">
+                    <strong>生图描述</strong>
+                    <p>{selectedTask.paragraph_description}</p>
+                  </div>
+                )}
+                <p className="detail-paragraph">{selectedTask.input.paragraph_content}</p>
+                {selectedTask.error && <div className="task-error">{selectedTask.error}</div>}
+              </div>
+            ) : (
+              <p className="muted">选择任务后查看详情。</p>
+            )}
+          </div>
+
+          <div className="panel-section event-panel">
+            <div className="panel-heading">
+              <div className="panel-heading-title">
+                <RefreshCw size={18} />
+                <span>执行记录</span>
+                <small>{runs.length} 条</small>
+              </div>
+              <button className="ghost-toggle" onClick={() => setRunLogOpen((current) => !current)}>
+                {isRunLogOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                {isRunLogOpen ? '收起' : '展开'}
+              </button>
+            </div>
+            {isRunLogOpen && (
+              <div className="run-list">
+                {runs.map((run) => (
+                  <div className={`run-item ${run.status}`} key={run.id}>
+                    <div>
+                      <strong>第 {run.attempt_no} 次 · {statusLabel[run.status]}</strong>
+                      <time>{new Date(run.created_at).toLocaleString()}</time>
+                    </div>
+                    <span>{run.elapsed_seconds ? `${run.elapsed_seconds}s` : '-'}</span>
+                    {run.error && <p>{run.error}</p>}
+                  </div>
+                ))}
+                {runs.length === 0 && <p className="muted">还没有执行记录。</p>}
+              </div>
+            )}
+          </div>
+        </aside>
+      </section>
+      ) : (
+        <div className="empty-state">
+          <BookOpen size={40} />
+          <h2>从左侧选择或新建一本书</h2>
+          <p>上传 Excel 后，系统会按 bookid 自动归档到书籍库。</p>
+        </div>
+      )}
+
+      {lightboxFile && (
+        <div className="lightbox" role="dialog" aria-modal="true" onClick={() => setLightboxFile(null)}>
+          <div className="lightbox-content" onClick={(event) => event.stopPropagation()}>
+            <div className="lightbox-toolbar">
+              <span>{lightboxFile.name}</span>
+              <div>
+                <a href={absolutePreviewUrl(lightboxFile.previewUrl)} target="_blank" rel="noreferrer">
+                  新窗口打开
+                </a>
+                <button onClick={() => setLightboxFile(null)}>关闭</button>
+              </div>
+            </div>
+            <img src={absolutePreviewUrl(lightboxFile.previewUrl)} alt={lightboxFile.name} />
+          </div>
+        </div>
+      )}
+      </section>
     </div>
   );
 }
@@ -1177,6 +2657,7 @@ function QualityPromptPage() {
   const [isCreating, setCreating] = useState(false);
   const [isRunning, setRunning] = useState(false);
   const [isCalibrating, setCalibrating] = useState(false);
+  const [loadingExperimentId, setLoadingExperimentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [promptPopover, setPromptPopover] = useState<PromptPopoverState | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -1210,6 +2691,9 @@ function QualityPromptPage() {
       mismatches
     };
   }, [experiment, qualityState?.activePromptVersionId]);
+
+  const qualityTaskItems = useMemo(() => buildQualityTaskItems(qualityState?.experiments ?? []), [qualityState?.experiments]);
+  const visibleQualityTasks = qualityTaskItems.slice(0, 3);
 
   const selectedVersionIds = useMemo(() => {
     if (selectedPromptVersionIds.size > 0) return Array.from(selectedPromptVersionIds);
@@ -1268,6 +2752,23 @@ function QualityPromptPage() {
     const state = await fetch('/api/quality/state').then((response) => readJson<QualityState>(response));
     setQualityState(state);
     return state;
+  }
+
+  async function loadQualityExperiment(experimentId: string) {
+    if (experiment?.id === experimentId) return;
+    setError(null);
+    setLoadingExperimentId(experimentId);
+    try {
+      const nextExperiment = await fetch(`/api/quality/experiments/${experimentId}`).then((response) =>
+        readJson<QualityExperiment>(response)
+      );
+      setExperiment(nextExperiment);
+      setSelectedRecordId(nextExperiment.records[0]?.id ?? null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '加载质量任务失败');
+    } finally {
+      setLoadingExperimentId(null);
+    }
   }
 
   async function uploadWorkbook(file: File) {
@@ -1530,6 +3031,35 @@ function QualityPromptPage() {
                 <Upload size={22} />
                 选择 Excel 或 CSV
               </button>
+            )}
+          </div>
+
+          <div className="panel-section quality-task-panel">
+            <div className="panel-heading">
+              <Database size={18} />
+              <span>任务管理</span>
+            </div>
+            {visibleQualityTasks.length > 0 ? (
+              <div className="quality-task-list">
+                {visibleQualityTasks.map((item) => (
+                  <button
+                    className={`quality-task-item ${experiment?.id === item.id ? 'active' : ''}`}
+                    key={item.id}
+                    onClick={() => void loadQualityExperiment(item.id)}
+                  >
+                    <span className={`status-dot ${item.status}`} />
+                    <span className="quality-task-content">
+                      <strong>{item.taskName}</strong>
+                      <small>
+                        {item.recordCount} 条 · {qualityStatusLabel[item.status]} · {formatCompactDateTime(item.createdAt)}
+                      </small>
+                    </span>
+                    {loadingExperimentId === item.id && <Loader2 className="spin" size={15} />}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">创建测试记录后，会在这里显示最近 3 个任务。</p>
             )}
           </div>
 

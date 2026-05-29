@@ -1,6 +1,27 @@
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ParsedWorkbook } from './types.js';
-import { __setWorkflowControlsForTest, createBatch, deleteTask, pauseTask, retryTask, startBatch, startSelectedTasks } from './queue.js';
+import {
+  __setWorkflowControlsForTest,
+  addManualBookTask,
+  continueBook,
+  createBatch,
+  deleteBatch,
+  deleteTask,
+  getTaskRuns,
+  hydrateBatchesFromStore,
+  listBatchesForBook,
+  listBookSummaries,
+  listTasksForBook,
+  pauseTask,
+  renameBatch,
+  renameBook,
+  retryTask,
+  startBatch,
+  startSelectedTasks
+} from './queue.js';
+import { closeStoreForTest, saveBatch } from './store.js';
 
 const workbook: ParsedWorkbook = {
   id: 'workbook-1',
@@ -25,6 +46,7 @@ const workbook: ParsedWorkbook = {
 describe('queue', () => {
   afterEach(() => {
     __setWorkflowControlsForTest();
+    closeStoreForTest();
   });
 
   const makeBatch = () =>
@@ -85,6 +107,8 @@ describe('queue', () => {
     expect(['queued', 'running']).toContain(task.status);
     expect(task.attempts).toBeLessThan(2);
     expect(task.error).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(batch.tasks[1].status).toBe('queued');
   });
 
   it('captures intermediate Dify node outputs during streaming execution', async () => {
@@ -189,5 +213,237 @@ describe('queue', () => {
     const batch = makeBatch();
 
     expect(() => startSelectedTasks(batch.id, [batch.tasks[2].id])).toThrow('没有可生成');
+  });
+
+  it('persists books and restores batches from sqlite', () => {
+    process.env.BATCH_STORE_PATH = path.join(os.tmpdir(), `dify-batch-${Date.now()}-${Math.random()}.sqlite`);
+    closeStoreForTest();
+    const batch = makeBatch();
+
+    expect(listBookSummaries().map((book) => book.book_id).sort((a, b) => a - b)).toEqual([0, 1, 2]);
+    closeStoreForTest();
+
+    const restoredCount = hydrateBatchesFromStore();
+    expect(restoredCount).toBeGreaterThan(0);
+    const restoredBooks = listBookSummaries();
+    expect(restoredBooks.some((book) => book.book_id === batch.tasks[0].input.book_id)).toBe(true);
+    delete process.env.BATCH_STORE_PATH;
+  });
+
+  it('records task run snapshots after execution', async () => {
+    __setWorkflowControlsForTest(async () => ({
+      workflowRunId: 'run-recorded',
+      taskId: 'dify-task-recorded',
+      outputs: { title: '已保存标题' },
+      raw: { ok: true }
+    }));
+    const batch = makeBatch();
+    startSelectedTasks(batch.id, [batch.tasks[0].id]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const runs = getTaskRuns(batch.tasks[0].id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].workflow_run_id).toBe('run-recorded');
+    expect(runs[0].status).toBe('succeeded');
+  });
+
+  it('does not create a temporary task list for manual tasks', () => {
+    const task = addManualBookTask({
+      book_id: 99,
+      chapter_sort: 1,
+      paragraph_content: '手动新增段落'
+    });
+
+    expect(() => continueBook(99)).toThrow('请先选择一个上传文档任务清单');
+    expect(listBatchesForBook(99)).toEqual([]);
+    expect(getTaskRuns(task.id)).toHaveLength(0);
+  });
+
+  it('continues only book tasks matching the requested filters', async () => {
+    const ranRows: number[] = [];
+    __setWorkflowControlsForTest(async (task) => {
+      ranRows.push(task.row_no);
+      return {
+        workflowRunId: `run-${task.row_no}`,
+        taskId: `task-${task.row_no}`,
+        outputs: { title: `标题 ${task.row_no}` },
+        raw: {}
+      };
+    });
+
+    const first = makeBatch();
+    const second = createBatch(
+      {
+        ...workbook,
+        id: 'workbook-filtered-continue',
+        fileName: 'filtered-continue.xlsx',
+        sheets: [
+          {
+            ...workbook.sheets[0],
+            rows: [{ __row_no: 9, book_id: '1', paragraph_content: '第二批待执行段落', chapter_sort: '20' }]
+          }
+        ]
+      },
+      'Sheet1',
+      {
+        book_id: 'book_id',
+        paragraph_content: 'paragraph_content',
+        chapter_sort: 'chapter_sort'
+      }
+    );
+
+    const batch = continueBook(1, { batchId: second.id });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(batch.id).toBe(second.id);
+    expect(batch.tasks.map((task) => task.id)).toEqual([second.tasks[0].id]);
+    expect(ranRows).toEqual([9]);
+    expect(listTasksForBook(1, { batchId: first.id })[0].status).toBe('queued');
+  });
+
+  it('requires an uploaded document task list before continuing a book', () => {
+    makeBatch();
+
+    expect(() => continueBook(1)).toThrow('请先选择一个上传文档任务清单');
+  });
+
+  it('recovers an interrupted running batch that has no running task before continuing', () => {
+    __setWorkflowControlsForTest(async () => ({
+      workflowRunId: 'run-recovered',
+      taskId: 'task-recovered',
+      outputs: { title: '恢复后执行' },
+      raw: {}
+    }));
+    const batch = makeBatch();
+    batch.status = 'running';
+    saveBatch(batch);
+
+    expect(() => continueBook(1, { batchId: batch.id })).not.toThrow();
+    expect(batch.status).toBe('running');
+  });
+
+  it('keeps a genuinely running task blocked with row-level context', () => {
+    const batch = makeBatch();
+    batch.status = 'running';
+    batch.tasks[0].status = 'running';
+    batch.tasks[0].progress_label = '执行节点：HTTP 请求';
+    saveBatch(batch);
+
+    expect(() => continueBook(1, { batchId: batch.id })).toThrow('第 2 行');
+  });
+
+  it('renames books and persists the display name', () => {
+    process.env.BATCH_STORE_PATH = path.join(os.tmpdir(), `dify-batch-${Date.now()}-${Math.random()}.sqlite`);
+    closeStoreForTest();
+    makeBatch();
+
+    const renamed = renameBook(1, '废材那又怎样');
+
+    expect(renamed?.name).toBe('废材那又怎样');
+    closeStoreForTest();
+    expect(listBookSummaries().find((book) => book.book_id === 1)?.name).toBe('废材那又怎样');
+    delete process.env.BATCH_STORE_PATH;
+  });
+
+  it('renames batches and persists the display name in book batch lists', () => {
+    process.env.BATCH_STORE_PATH = path.join(os.tmpdir(), `dify-batch-${Date.now()}-${Math.random()}.sqlite`);
+    closeStoreForTest();
+    const batch = makeBatch();
+
+    renameBatch(batch.id, '第一批高光任务');
+
+    expect(listBatchesForBook(1)[0].file_name).toBe('第一批高光任务');
+    closeStoreForTest();
+    expect(listBatchesForBook(1)[0].file_name).toBe('第一批高光任务');
+    delete process.env.BATCH_STORE_PATH;
+  });
+
+  it('lists batches for a single book with task statistics', () => {
+    const first = makeBatch();
+    const second = createBatch(
+      {
+        ...workbook,
+        id: 'workbook-2',
+        fileName: 'second.xlsx',
+        sheets: [
+          {
+            ...workbook.sheets[0],
+            rows: [{ __row_no: 2, book_id: '1', paragraph_content: '第二批段落', chapter_sort: '8' }]
+          }
+        ]
+      },
+      'Sheet1',
+      {
+        book_id: 'book_id',
+        paragraph_content: 'paragraph_content',
+        chapter_sort: 'chapter_sort'
+      }
+    );
+
+    const summaries = listBatchesForBook(1);
+
+    expect(summaries.map((batch) => batch.id)).toEqual([second.id, first.id]);
+    expect(summaries[0].task_count).toBe(1);
+    expect(summaries[1].task_count).toBe(1);
+  });
+
+  it('deletes a batch and removes its tasks from book views', async () => {
+    const first = makeBatch();
+    const second = createBatch(
+      {
+        ...workbook,
+        id: 'workbook-delete',
+        fileName: 'delete-target.xlsx',
+        sheets: [
+          {
+            ...workbook.sheets[0],
+            rows: [{ __row_no: 2, book_id: '1', paragraph_content: '待删除批次段落', chapter_sort: '9' }]
+          }
+        ]
+      },
+      'Sheet1',
+      {
+        book_id: 'book_id',
+        paragraph_content: 'paragraph_content',
+        chapter_sort: 'chapter_sort'
+      }
+    );
+
+    await deleteBatch(second.id);
+
+    expect(listBatchesForBook(1).map((batch) => batch.id)).toEqual([first.id]);
+    expect(listTasksForBook(1, { batchId: second.id })).toEqual([]);
+    expect(listTasksForBook(1).map((task) => task.id)).not.toContain(second.tasks[0].id);
+  });
+
+  it('filters book tasks by batch, chapter range, row range, image presence, and value status', () => {
+    const batch = makeBatch();
+    batch.tasks[0].is_valid = 1;
+    batch.tasks[0].result_files = [
+      {
+        id: 'file-1',
+        taskId: batch.tasks[0].id,
+        name: 'result.png',
+        mimeType: 'image/png',
+        previewUrl: '/api/files/file-1',
+        sourceKind: 'local'
+      }
+    ];
+    batch.tasks[1].is_valid = 0;
+    saveBatch(batch);
+
+    const valuableWithImage = listTasksForBook(1, {
+      batchId: batch.id,
+      chapterSortFrom: 2,
+      chapterSortTo: 2,
+      hasImage: 'yes',
+      valueStatus: 'valuable'
+    });
+    const notValuable = listTasksForBook(2, { hasImage: 'no', valueStatus: 'not_valuable' });
+    const rowRange = listTasksForBook(1, { rowNoFrom: 2, rowNoTo: 2 });
+
+    expect(valuableWithImage.map((task) => task.id)).toEqual([batch.tasks[0].id]);
+    expect(rowRange.map((task) => task.id)).toEqual([batch.tasks[0].id]);
+    expect(notValuable.map((task) => task.id)).toEqual([batch.tasks[1].id]);
   });
 });

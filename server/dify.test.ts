@@ -1,7 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { __testables } from './dify.js';
+import { createServer } from 'node:http';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { BatchTask } from './types.js';
+import { __testables, applyDifyResult } from './dify.js';
+
+function listen(server: ReturnType<typeof createServer>) {
+  return new Promise<number>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      resolve(typeof address === 'object' && address ? address.port : 0);
+    });
+  });
+}
 
 describe('dify helpers', () => {
+  afterEach(() => {
+    delete process.env.DIFY_API_BASE;
+  });
+
   it('extracts outputs from blocking payload shape', () => {
     expect(
       __testables.extractOutputs({
@@ -97,5 +112,119 @@ describe('dify helpers', () => {
     expect(files).toHaveLength(1);
     expect(files[0].remoteUrls).toContain('http://dify.qmniu.com/files/result.png');
     expect(files[0].remoteUrls).toContain('http://dify.qmniu.com/v1/files/result.png');
+  });
+
+  it('caches remote result files locally when applying workflow outputs', async () => {
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const server = createServer((_req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Content-Length': String(png.length)
+      });
+      res.end(png);
+    });
+    const port = await listen(server);
+    const task: BatchTask = {
+      id: 'task-cache',
+      row_no: 2,
+      input: {
+        book_id: 1,
+        paragraph_content: '段落',
+        chapter_sort: 1
+      },
+      status: 'running',
+      attempts: 1,
+      result_files: []
+    };
+
+    try {
+      await applyDifyResult(task, {
+        workflowRunId: 'run-cache',
+        taskId: 'dify-cache',
+        outputs: {
+          result: [
+            {
+              url: `http://127.0.0.1:${port}/image.png`,
+              filename: 'image.png',
+              mime_type: 'image/png'
+            }
+          ]
+        },
+        raw: {}
+      });
+    } finally {
+      server.close();
+    }
+
+    expect(task.result_files).toHaveLength(1);
+    expect(task.result_files[0].localPath).toBeTruthy();
+    expect(task.result_files[0].size).toBe(png.length);
+  });
+
+  it('accepts alternate image output field names', async () => {
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const server = createServer((_req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Content-Length': String(png.length)
+      });
+      res.end(png);
+    });
+    const port = await listen(server);
+    const task: BatchTask = {
+      id: 'task-alt-image',
+      row_no: 2,
+      input: {
+        book_id: 1,
+        paragraph_content: '段落',
+        chapter_sort: 1
+      },
+      status: 'running',
+      attempts: 1,
+      result_files: []
+    };
+
+    try {
+      await applyDifyResult(task, {
+        workflowRunId: 'run-alt-image',
+        taskId: 'dify-alt-image',
+        outputs: {
+          image_url: `http://127.0.0.1:${port}/alternate.png`
+        },
+        raw: {}
+      });
+    } finally {
+      server.close();
+    }
+
+    expect(task.result_files).toHaveLength(1);
+    expect(task.result_files[0].remoteUrl).toBe(`http://127.0.0.1:${port}/alternate.png`);
+  });
+
+  it('keeps failed image downloads as text output instead of failing the task', async () => {
+    const task: BatchTask = {
+      id: 'task-bad-image',
+      row_no: 2,
+      input: {
+        book_id: 1,
+        paragraph_content: '段落',
+        chapter_sort: 1
+      },
+      status: 'running',
+      attempts: 1,
+      result_files: []
+    };
+
+    await applyDifyResult(task, {
+      workflowRunId: 'run-bad-image',
+      taskId: 'dify-bad-image',
+      outputs: {
+        image_url: 'https://example.com/result.png'
+      },
+      raw: {}
+    });
+
+    expect(task.result_files).toHaveLength(0);
+    expect(task.result_text).toBe('https://example.com/result.png');
   });
 });

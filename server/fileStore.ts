@@ -7,6 +7,13 @@ import type { ResultFile } from './types.js';
 
 const TMP_DIR = path.resolve(process.cwd(), 'tmp', 'dify-files');
 
+export class FileUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FileUnavailableError';
+  }
+}
+
 const files = new Map<string, ResultFile>();
 
 function extensionForMime(mimeType: string) {
@@ -120,6 +127,10 @@ export function getFile(id: string) {
   return files.get(id);
 }
 
+export function registerStoredFile(file: ResultFile) {
+  files.set(file.id, file);
+}
+
 export async function ensureLocalFile(file: ResultFile) {
   if (file.localPath) return file.localPath;
   const remoteUrls = file.remoteUrls?.length ? file.remoteUrls : file.remoteUrl ? [file.remoteUrl] : [];
@@ -208,5 +219,5 @@ export async function streamFile(id: string) {
       errors.push(`${error instanceof Error ? error.message : '请求失败'} ${url}`);
     }
   }
-  throw new Error(`读取图片失败：${errors.join('；')}`);
+  throw new FileUnavailableError(`图片链接已失效或暂时不可访问：${errors.join('；')}`);
 }
