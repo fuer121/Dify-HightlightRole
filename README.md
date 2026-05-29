@@ -6,11 +6,11 @@
 
 ## 当前基线
 
-- 日期：2026-05-21
-- 当前分支：`codex/book-select`
-- 已合并主线基线：`5175149 Merge pull request #2 from fuer121/codex/proseed-dify`
-- 当前分支目标：任务筛选与批量生成优化，包括按 `book_id` 筛选、按状态筛选、勾选任务后只生成选中范围。
-- 当前持久化策略：后端内存保存批次；服务重启后历史批次可丢失。
+- 日期：2026-05-26
+- 当前分支：`codex/book-control`
+- 已合并主线基线：`ee9d756 Merge pull request #3 from fuer121/codex/book-select`
+- 当前分支目标：书籍管理与任务记录持久化，支持按书籍聚合、查询、新增任务、查看历史执行记录和继续未完成任务。
+- 当前持久化策略：后端 SQLite 保存书籍、任务、批次和执行记录；默认路径 `data/dify-batch.sqlite`。
 - 当前部署边界：只面向本机运行，监听 `127.0.0.1`，不做公网账号体系。
 
 ## 已有能力
@@ -27,18 +27,17 @@
 - 提取 Dify 中间产物：`is_valid` 原值、生成段落描述环节的 `text`。
 - 图片结果经后端缓存/代理展示，避免前端直接暴露 Dify Key。
 - 导出飞书 Base，失败任务也会写入，方便复盘。
+- 书籍管理页按 `book_id` 聚合历史任务，可查询任务、手动新增、追加 Excel、查看执行记录并继续未完成任务。
 
 ## 当前分支增量
 
-`codex/book-select` 分支在任务表上方增加筛选与批量生成工具条：
+`codex/book-control` 分支新增书籍与记录管理：
 
-- 顶层 `book_id` 下拉：`全部书籍` 加当前批次唯一书籍 ID，数字升序。
-- 状态下拉：全部、排队中、执行中、成功、失败、已暂停。
-- 任务表 checkbox：表头选择当前筛选结果中的可生成任务，行 checkbox 只影响批量选择。
-- `生成当前筛选` / `生成选中`：没有手动勾选时生成当前筛选下所有可生成任务；有勾选时只生成勾选任务。
-- 批次运行中禁用筛选生成和选择操作。
-- 未选中的 `queued` 任务保持原状态，不会被顺带执行。
-- 选中的 `failed`、`paused`、`succeeded` 任务会清空旧输出并重新排队；字段校验失败任务不可纳入生成。
+- 新增顶层“书籍管理”页面，与“批量生图”“质量判断”同级。
+- SQLite 表包含 `books`、`tasks`、`task_runs`、`batches`、`batch_tasks` 和 `batch_events`。
+- 创建批次、任务状态变更、任务结果、删除、导出都会同步持久化。
+- 服务启动会恢复历史批次；重启前处于 `running` 的任务恢复为可继续的暂停态。
+- “继续未完成”默认执行 `queued`、`paused`、非字段校验失败的 `failed`，不会重跑已成功任务。
 
 ## 运行
 
@@ -76,6 +75,7 @@ DIFY_RESPONSE_MODE=streaming
 QUALITY_DIFY_API_BASE=http://dify.qmniu.com/v1
 QUALITY_DIFY_API_KEY=replace-with-your-quality-workflow-api-key
 QUALITY_DIFY_RESPONSE_MODE=blocking
+BATCH_STORE_PATH=data/dify-batch.sqlite
 LARK_CLI_AS=user
 PORT=5175
 ```
@@ -198,6 +198,16 @@ Authorization: Bearer ${DIFY_API_KEY}
 - `GET /api/batches/:id/events`：SSE 推送批次状态。
 - `GET /api/files/:id`：代理/缓存图片文件。
 - `POST /api/batches/:id/export/lark`：新建飞书 Base 并导出当前批次全部剩余任务。
+- `GET /api/books`：书籍列表，支持 `q` 搜索，返回任务统计。
+- `GET /api/books/:bookId`：书籍详情。
+- `GET /api/books/:bookId/tasks`：查询书籍任务，支持 `status` 和 `q`。
+- `POST /api/books/:bookId/tasks`：给书籍手动新增单条任务。
+- `POST /api/books/:bookId/import-tasks`：向书籍追加 Excel/CSV 任务。
+- `POST /api/books/:bookId/continue`：继续该书籍未完成任务。
+- `GET /api/tasks/:taskId/runs`：查看任务执行记录。
+- `POST /api/tasks/:taskId/pause`：暂停历史任务。
+- `POST /api/tasks/:taskId/retry`：重试历史任务。
+- `DELETE /api/tasks/:taskId`：删除历史任务。
 
 `POST /api/batches` 请求体：
 

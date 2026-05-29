@@ -6,5 +6,6 @@ dist
 .DS_Store
 .vite
 tmp
+data
 uploads
 coverage
