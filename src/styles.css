@@ -195,7 +195,7 @@ button {
 }
 
 .quality-workspace-content {
-  overflow: auto;
+  overflow: visible;
 }
 
 .app-nav {
@@ -2288,6 +2288,22 @@ select {
   align-self: start;
 }
 
+.quality-right {
+  align-self: stretch;
+  max-height: none;
+  overflow: visible;
+  position: relative;
+  top: auto;
+}
+
+.quality-right .result-panel {
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  position: sticky;
+  top: 18px;
+  z-index: 5;
+}
+
 .quality-task-panel {
   padding-bottom: 14px;
 }
@@ -2485,6 +2501,16 @@ select {
 
 .quality-table-wrap {
   overflow: auto;
+}
+
+.quality-pagination {
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.quality-pagination .pagination-summary {
+  min-width: 220px;
+  white-space: nowrap;
 }
 
 .quality-table {
@@ -2759,6 +2785,11 @@ select {
 
   .quality-right {
     grid-column: 1 / -1;
+    max-height: none;
+    position: static;
+  }
+
+  .quality-right .result-panel {
     max-height: none;
     position: static;
   }

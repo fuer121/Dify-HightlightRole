@@ -33,6 +33,7 @@ type ImagePresenceFilter = 'all' | 'yes' | 'no';
 type ValueStatusFilter = 'all' | 'valuable' | 'not_valuable' | 'unknown';
 type RangeFilterMode = 'chapter' | 'row';
 type TaskPageSize = 20 | 50 | 200;
+type QualityPageSize = 20 | 50 | 100;
 type BookTaskColumnKey = 'status' | 'image' | 'source' | 'is_valid' | 'paragraph' | 'result' | 'actions';
 type BookTaskColumnWidths = Record<BookTaskColumnKey, number>;
 type ImageValue = '有价值' | '无价值';
@@ -334,6 +335,7 @@ const VALUE_FILTER_OPTIONS: Array<{ value: ValueStatusFilter; label: string }> =
 ];
 
 const TASK_PAGE_SIZE_OPTIONS: TaskPageSize[] = [20, 50, 200];
+const QUALITY_PAGE_SIZE_OPTIONS: QualityPageSize[] = [20, 50, 100];
 const DEFAULT_RANGE_FILTER_STATE = {
   mode: 'chapter' as RangeFilterMode,
   chapterFrom: '',
@@ -2652,6 +2654,8 @@ function QualityPromptPage() {
   const [qualityState, setQualityState] = useState<QualityState | null>(null);
   const [experiment, setExperiment] = useState<QualityExperiment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [qualityPage, setQualityPage] = useState(1);
+  const [qualityPageSize, setQualityPageSize] = useState<QualityPageSize>(50);
   const [selectedPromptVersionIds, setSelectedPromptVersionIds] = useState<Set<string>>(() => new Set());
   const [isUploading, setUploading] = useState(false);
   const [isCreating, setCreating] = useState(false);
@@ -2673,6 +2677,13 @@ function QualityPromptPage() {
   const selectedRecord = useMemo(
     () => experiment?.records.find((record) => record.id === selectedRecordId) ?? experiment?.records[0],
     [experiment, selectedRecordId]
+  );
+  const qualityTotalPages = Math.max(1, Math.ceil((experiment?.records.length ?? 0) / qualityPageSize));
+  const qualityPageStart = experiment ? (qualityPage - 1) * qualityPageSize : 0;
+  const qualityPageEnd = experiment ? Math.min(qualityPageStart + qualityPageSize, experiment.records.length) : 0;
+  const paginatedQualityRecords = useMemo(
+    () => experiment?.records.slice(qualityPageStart, qualityPageEnd) ?? [],
+    [experiment, qualityPageEnd, qualityPageStart]
   );
 
   const qualityStats = useMemo(() => {
@@ -2718,6 +2729,7 @@ function QualityPromptPage() {
       .then((payload) => {
         if (payload) {
           setExperiment(payload);
+          setQualityPage(1);
           setSelectedRecordId(payload.records?.[0]?.id ?? null);
         }
       })
@@ -2739,6 +2751,10 @@ function QualityPromptPage() {
     };
     return () => source.close();
   }, [experiment?.id]);
+
+  useEffect(() => {
+    setQualityPage((current) => Math.min(Math.max(1, current), qualityTotalPages));
+  }, [qualityTotalPages]);
 
   useEffect(() => {
     return () => {
@@ -2763,6 +2779,7 @@ function QualityPromptPage() {
         readJson<QualityExperiment>(response)
       );
       setExperiment(nextExperiment);
+      setQualityPage(1);
       setSelectedRecordId(nextExperiment.records[0]?.id ?? null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '加载质量任务失败');
@@ -2788,6 +2805,7 @@ function QualityPromptPage() {
       setRowLimit('');
       setExperiment(null);
       setSelectedRecordId(null);
+      setQualityPage(1);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : '上传失败');
     } finally {
@@ -2819,6 +2837,7 @@ function QualityPromptPage() {
         })
       }).then((response) => readJson<QualityExperiment>(response));
       setExperiment(nextExperiment);
+      setQualityPage(1);
       setSelectedRecordId(nextExperiment.records[0]?.id ?? null);
       await refreshQualityState();
     } catch (createError) {
@@ -2892,6 +2911,21 @@ function QualityPromptPage() {
       }
       return next;
     });
+  }
+
+  function selectQualityPage(page: number) {
+    if (!experiment) return;
+    const nextPage = Math.min(Math.max(1, page), qualityTotalPages);
+    const nextRecord = experiment.records[(nextPage - 1) * qualityPageSize];
+    setQualityPage(nextPage);
+    if (nextRecord) setSelectedRecordId(nextRecord.id);
+  }
+
+  function changeQualityPageSize(pageSize: QualityPageSize) {
+    const firstRecord = experiment?.records[0];
+    setQualityPageSize(pageSize);
+    setQualityPage(1);
+    if (firstRecord) setSelectedRecordId(firstRecord.id);
   }
 
   function clearPromptPopoverTimer() {
@@ -3148,7 +3182,7 @@ function QualityPromptPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {experiment.records.map((record) => (
+                    {paginatedQualityRecords.map((record) => (
                       <tr
                         key={record.id}
                         className={selectedRecord?.id === record.id ? 'selected' : ''}
@@ -3179,8 +3213,51 @@ function QualityPromptPage() {
                         </td>
                       </tr>
                     ))}
+                    {paginatedQualityRecords.length === 0 && (
+                      <tr>
+                        <td className="table-empty" colSpan={experiment.promptVersionIds.length + 3}>
+                          当前测试记录没有段落。
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
+              </div>
+              <div className="task-pagination quality-pagination">
+                <div className="pagination-summary">
+                  {experiment.records.length > 0
+                    ? `第 ${qualityPageStart + 1}-${qualityPageEnd} / ${experiment.records.length} 条 · 第 ${qualityPage} / ${qualityTotalPages} 页`
+                    : '0 条'}
+                </div>
+                <label>
+                  每页
+                  <select
+                    value={qualityPageSize}
+                    onChange={(event) => changeQualityPageSize(Number(event.target.value) as QualityPageSize)}
+                  >
+                    {QUALITY_PAGE_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option} 条
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="pagination-actions">
+                  <button
+                    className="secondary-action"
+                    disabled={qualityPage <= 1}
+                    onClick={() => selectQualityPage(qualityPage - 1)}
+                  >
+                    上一页
+                  </button>
+                  <button
+                    className="secondary-action"
+                    disabled={qualityPage >= qualityTotalPages}
+                    onClick={() => selectQualityPage(qualityPage + 1)}
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
             </div>
           ) : selectedSheet ? (
