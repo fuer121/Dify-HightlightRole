@@ -1,0 +1,1351 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: workflow
+  name: LL-段落高光生图-效果测试
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: bowenliang123/base64_codec:1.0.1@034fdfa9602a2b207c0009adecb8998344dbb4f74a223c88680b477c83ee783b
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.15@725407927b04e236212083d20e92830d60fa944e42cd357ef6902c160414f6f1
+    version: null
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 600
+        batch_count_limit: 5
+        file_size_limit: 600
+        image_file_batch_limit: 10
+        image_file_size_limit: 600
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 600
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: tool
+      id: 1778479530920-source-1778738083884-target
+      selected: false
+      source: '1778479530920'
+      sourceHandle: source
+      target: '1778738083884'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: tool
+        targetType: llm
+      id: 1778738083884-source-1778480765888-target
+      selected: false
+      source: '1778738083884'
+      sourceHandle: source
+      target: '1778480765888'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1778480765888-source-1778480914080-target
+      selected: false
+      source: '1778480765888'
+      sourceHandle: source
+      target: '1778480914080'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 1778563246280-source-1778824781665-target
+      source: '1778563246280'
+      sourceHandle: source
+      target: '1778824781665'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: tool
+      id: 1778824781665-source-1778744029960-target
+      source: '1778824781665'
+      sourceHandle: source
+      target: '1778744029960'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: llm
+      id: 1778480918522-source-17788285107480-target
+      source: '1778480918522'
+      sourceHandle: source
+      target: '17788285107480'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 17788285107480-source-1778480992895-target
+      source: '17788285107480'
+      sourceHandle: source
+      target: '1778480992895'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: end
+      id: 1778744029960-source-1779084959324-target
+      source: '1778744029960'
+      sourceHandle: source
+      target: '1779084959324'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 1778480992895-source-1778563246280-target
+      source: '1778480992895'
+      sourceHandle: source
+      target: '1778563246280'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: 1778480914080-source-1779355317443-target
+      source: '1778480914080'
+      sourceHandle: source
+      target: '1779355317443'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: end
+      id: 1779355317443-false-1779355349021-target
+      source: '1779355317443'
+      sourceHandle: 'false'
+      target: '1779355349021'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1779355317443-true-17794430447870-target
+      source: '1779355317443'
+      sourceHandle: 'true'
+      target: '17794430447870'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: 17794430447870-source-1778480918522-target
+      source: '17794430447870'
+      sourceHandle: source
+      target: '1778480918522'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: ''
+          hint: ''
+          label: 书籍id
+          max_length: 48
+          options: []
+          placeholder: ''
+          required: true
+          type: number
+          variable: book_id
+        - default: ''
+          hint: ''
+          label: 段落内容
+          max_length: 100000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: paragraph_content
+        - default: ''
+          hint: ''
+          label: 章节序号
+          max_length: 48
+          options: []
+          placeholder: ''
+          required: true
+          type: number
+          variable: chapter_sort
+      height: 161
+      id: '1778479530920'
+      position:
+        x: 32.00172424316406
+        y: 127.0017318725586
+      positionAbsolute:
+        x: 32.00172424316406
+        y: 127.0017318725586
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: bfa86a63-6a84-4362-bc41-f2758a8592b6
+          role: system
+          text: "角色设定\n你是一位严苛的 AI 绘画视觉总监。你的核心职责是“去伪存真”：判断小说段落是否包含足够具体、可被图像模型渲染的视觉信息，能否生成一张有还原价值的分镜图。\n\
+            \n核心原则\nAI 绘图模型只能稳定画出“看得到的东西”：人物、外貌、姿态、表情、服饰、道具、武器、建筑、地形、天气、颜色、光影、材质、损毁状态、空间关系、正在发生的动作。\n\
+            AI 绘图模型不能直接画出“听得到的口号”或“感受到的抽象气势”：命运、尊严、主宰、悲伤、压迫感、杀意、震撼、逆天、无敌、气势爆发、内心独白、关系解释、作者评价。\n\
+            只有当抽象情绪或气势被转化为可见表现时，才算视觉元素。例如：流血、跪地、拔剑、火焰缠绕手臂、暴雨打湿衣袍、宫殿坍塌、蓝色光芒照亮面庞。\n\n\
+            任务\n请评估给出的小说高光段落是否具备生成分镜图的价值，并输出严格 JSON。\n\n判断流程\n1. 先提取段落中真实存在的可见元素，包括人物、物体、环境、动作、姿态、表情、颜色、光影、材质、天气、损毁、空间关系。\n\
+            2. 再识别非视觉内容，包括纯对话、口号、心理活动、抽象情绪、世界观解释、关系说明、时间跨度过长的过程。\n3. 只根据段落原文中的可见证据评分，不要奖励需要模型自行脑补的画面。\n\
+            4. 判断它能否定格成“一张静态分镜图”。如果主要内容是思考、回忆、解释、对话、长期过程，则降低评分。\n5. 优先保证精确率。拿不准时判为“无价值”，除非段落已经提供清晰主体、具体动作和具体环境。\n\
+            \n评分标准\n1-3 分：视觉废料。\n适用于纯对话、纯口号、纯心理描写、抽象概念堆砌、关系解释、剧情意义很大但没有具体画面的段落。模型只能瞎编画面，无法还原原文。\n\
+            \n4-6 分：勉强可用。\n有可见主体或场景，但细节泛化，动作弱，构图不清，模型仍需脑补大量信息。例如“一个人站在山上”“他说完后看向众人”。默认判为“无价值”。只有当\
+            \ 6 分段落同时具备清晰主体、具体动作、具体环境，并且能形成非泛化画面时，才可判为“有价值”。\n\n7-8 分：优质素材。\n有明确主体、具体动作、清晰环境，并包含可见道具、服饰、身体状态、天气、建筑、战场、房间细节、怪物特征、法术效果或空间关系。模型可以基本按原文生成画面。\n\
+            \n9-10 分：视觉盛宴。\n具有强烈画面冲击力，主体、动作、环境、构图、光影、色彩、材质、情绪外显都较完整。生成图能明显区别于普通玄幻/都市/战斗模板。\n\
+            \n二元判定规则\n- 7-10 分：生图价值 = 有价值。\n- 1-5 分：生图价值 = 无价值。\n- 6 分是边界分：只有“清晰主体\
+            \ + 具体动作 + 具体环境”三者同时成立，且画面不依赖大量脑补，才判为有价值；否则判为无价值。\n\n强制降分规则\n- 只有口号、宣言、霸气台词，没有可见动作和场景：1-3\
+            \ 分，无价值。\n- 只有“杀意、威压、气势、悲伤、震撼、主宰、命运”等抽象词，没有可见表现：1-3 分，无价值。\n- 只有人物名字或身份，没有外貌、动作、环境、道具：1-4\
+            \ 分，无价值。\n- 纯对话即使情绪强烈，也默认无价值；除非对话周围有清晰可见的舞台、动作和构图。\n- 剧情很重要但不可见，不加分。\n\
+            - 模型必须发明主体、场景、服装、动作、光影、构图时，不得判为有价值。\n\n可提升规则\n- 短段落也可以有价值，只要它提供了强烈的静态画面。\n\
+            - 抽象情绪可以加分，但前提是有可见外化表现，例如眼泪、伤口、颤抖、跪倒、火焰、破碎物、光线变化、环境崩塌。\n- 战斗、变身、灾难、仪式、处刑、重逢、死亡等题材不自动有价值；仍必须有可见主体、动作和环境。\n\
+            \n项目校准规则（2026/5/24 12:06:56）\n以下人工校验样本优先级高于通用规则。判断新段落时，应从这些误判中抽象出更严格的边界，而不是记忆具体文本。\n\
+            \n误判为“无价值”但应为“有价值”的样本：\n- 行 2：原判 无价值，人工标注 有价值。段落：““哈哈哈…这就是所谓的清潭高中第一天才？笑死我了！她弱得我一拳下去直接趴了。””。模型理由：只有一句嘲讽台词，没有可见的人物、动作、环境、道具或具体画面，模型无法还原任何具体视觉元素。\n\
+            - 行 3：原判 无价值，人工标注 有价值。段落：““太牛了！她连燕老师都不放在眼里！那可是学校为了武考而特意从大城市聘请来的高级教师啊！连校长都得礼让三分，她硬是一点面子都没给！””。模型理由：纯对话和感叹，没有任何可见的人物、动作、环境或道具，模型只能瞎编画面。\n\
+            - 行 5：原判 无价值，人工标注 有价值。段落：““适可而止。”就在林眉准备迎接自己的死路时，一道温润的男声在他耳边出现，他睁开眼睛，带着黑色眼镜的男人出现在了自己身前，点了点头，“谭浮同学。””。模型理由：只有人物出现和点头动作，缺乏具体环境、光影、服饰细节和构图张力，画面泛化，模型需脑补大量信息。\n\
+            - 行 8：原判 无价值，人工标注 有价值。段落：“心有余悸的拍拍自己的胸膛，“好险啊！要是被拆穿了我是个废材，恐怕要被那群人的口水给淹死。””。模型理由：只有内心独白和抽象情绪，没有任何可见的人物、动作、环境或道具，模型无法生成具体画面。\n\
+            - 行 10：原判 无价值，人工标注 有价值。段落：“谭浮在众人充满敬畏的目光下淡然的离开。”。模型理由：有主体和围观者，但动作只有离开，缺乏具体环境、姿态、服饰、光影等细节，画面泛化，模型需脑补大量信息。\n\
+            - 行 15：原判 无价值，人工标注 有价值。段落：“看见他们离开的背影，玉然收拾东西的手一顿，她转头看向还坐在位置上刷题的少年，语气戏谑，“班长大人，你说老师叫她过去是干嘛的？””。模型理由：只有两个静态动作和一句对话，缺乏具体环境、光影、表情细节，画面泛化且依赖脑补，无法构成有冲击力的分镜。\n\
+            校准要求：遇到同类段落时，即使文字简短，只要主体、动作、环境或关键视觉状态足以形成非泛化静态画面，可以判为有价值。\n\n项目校准规则（2026/5/24\
+            \ 21:34:55）\n以下人工校验样本优先级高于通用规则。判断新段落时，应从这些误判中抽象出更严格的边界，而不是记忆具体文本。\n\n\
+            误判为“无价值”但应为“有价值”的样本：\n- 行 7：原判 无价值，人工标注 有价值。段落：“其实她是想露出恳求的神色跟校医撒个娇，可是这个身体习惯了装逼，本能的不允许自己露出任何破坏逼格的表情。”。模型理由：全段是内心独白和抽象情绪，没有任何可见的人物、动作、环境或道具，模型只能瞎编画面。\n\
+            - 行 22：原判 无价值，人工标注 有价值。段落：“谭浮蹲在坑上，她捏住鼻子，从兜里掏出药剂，道，“你懂什么？自古成大事者，都少不了传说中的厕所教育，闻得臭中臭，方为人上人，为了我们能平安的考上大学，这点苦算什么！””。模型理由：有主体和动作，但环境模糊（坑上），缺乏具体光影、服饰、构图细节，画面泛化，模型需脑补大量信息。\n\
+            - 行 25：原判 无价值，人工标注 有价值。段落：“最终，李老师抬着头，看向了已经变成黑色的天空，神色惊疑不定，“二班的特聘老师果然名不虚传，修炼方式也异于常人……居然把人冻在冰里磨炼意志力，佩服！””。模型理由：主体动作只有抬头看天和表情，核心是对话和抽象评价，缺乏具体环境、道具、动作构图，画面泛化且依赖脑补。\n\
+            - 行 58：原判 无价值，人工标注 有价值。段落：“燕温眉头一挑，眼中笑意浅浅，“对抗赛后，请把她交给我训练.......””。模型理由：只有微表情和一句对话，缺乏具体环境、动作、道具和构图，模型只能脑补画面。\n\
+            - 行 61：原判 无价值，人工标注 有价值。段落：“从兜里拿出今天赢的两支修复液，面带歉意的说道，“臣今天居然犯了大错，居然把小主误认为那不安好心的邪魔歪道，这实在是不可饶恕，为请罪，臣今天特献上辛苦装逼夺来的修复液，还请小主用之……””。模型理由：只有拿修复液和道歉台词，缺乏具体环境、服饰、光影、动作张力，画面泛化且依赖脑补，无法构成有冲击力的静态分镜。\n\
+            - 行 88：原判 无价值，人工标注 有价值。段落：“老专家点点头，面色严肃，“虫洞波动最严重的地方一般就是靠王虫比较近的，经我们检测，现在虫洞波动最严重的地方是……一中？！””。模型理由：只有点头和严肃表情两个微动作，核心是对话和抽象信息，缺乏具体环境、道具、光影和构图张力，模型只能瞎编画面。\n\
+            校准要求：遇到同类段落时，即使文字简短，只要主体、动作、环境或关键视觉状态足以形成非泛化静态画面，可以判为有价值。\n\n项目边界修正规则（2026/5/29）\n\
+            本规则用于修正 V3 的边界漂移：保留“短段落/微动作也可能有生图价值”的召回方向，但严格区分“原文可见证据”和“类型/语境推断”。\n\n\
+            证据分层要求：\n1. visual_elements 只能列出原文明确出现、或由原文字面直接可见的视觉证据：人物/身份称谓、动作、姿态、表情、道具、身体状态、地点名、环境物、颜色、光影、材质、空间关系。\n\
+            2. 不得把推断出来的场景、服装、背景、镜头、职业空间、战场状态、学校/实验室/办公室布置、怪物形态等写进 visual_elements。原文没有写“屏幕、仪器、教室、虫洞光效、王虫外形”，就不能列入视觉元素。\n\
+            3. 类型信息和上下文暗示可以辅助判断 genre/context，但只能写进 reason 或 calibration_note，例如“可按校园/科幻语境辅助构图”；不得把它们当作评分证据，也不得让它们单独把分数抬到\
+            \ 7 分以上。\n4. 短段落或台词段若包含可见主体、微动作、表情、手部动作、道具、位置关系或关键视觉状态，可以判为有价值；但评分理由必须说明依赖的是哪些原文可见锚点。\n\
+            5. 如果段落只有信息型台词/设定解释，缺少原文明确的可见主体动作或状态，即使能想象出宏大场景，也应判为无价值或边界 4-6 分。\n\n\
+            输出约束：\n- visual_elements 是“证据清单”，不是“可生成提示词清单”。宁可少列，不可脑补。\n- 推断出来的构图建议如有必要，只能放在\
+            \ calibration_note，并标明“推断/语境辅助”。\n- reason 中必须区分：原文已给出的可见锚点 vs 需要模型脑补的部分。\n\
+            \n输出要求\n只输出 JSON，不要输出 Markdown，不要输出解释性段落。\n\nJSON 格式：\n{\n  \"score\"\
+            : 1,\n  \"image_value\": \"有价值\",\n  \"recommendation\": \"强烈推荐\",\n \
+            \ \"visual_elements\": [\"元素1\", \"元素2\"],\n  \"non_visual_elements\"\
+            : [\"抽象内容1\", \"抽象内容2\"],\n  \"reason\": \"一句话说明决定性原因\",\n  \"calibration_note\"\
+            : \"边界样本才填写；否则为空字符串\"\n}\n\n字段要求\n- score 必须是 1 到 10 的整数。\n- image_value\
+            \ 只能是“有价值”或“无价值”。\n- recommendation 只能是“强烈推荐”“推荐”“一般”“不推荐”。\n- visual_elements\
+            \ 只能列出原文中存在或直接可见的元素，不要添加脑补内容；没有则输出空数组。\n- non_visual_elements 列出口号、心理、抽象情绪、关系解释等不适合直接生图的内容；没有则输出空数组。\n\
+            - reason 要毒舌、简短、准确指出为什么有价值或无价值。\n- calibration_note 仅在 6 分边界、规则冲突、或需要人工校验时填写。\n\
+            \n推荐标签映射\n- 9-10 分：强烈推荐\n- 7-8 分：推荐\n- 4-6 分：一般\n- 1-3 分：不推荐\n\n示例判断口径\n\
+            - “我要逆天而行，让天下臣服。” -> 无价值。只有口号，没有画面。\n- “他站在山巅。” -> 无价值。有人有地点，但太泛，缺乏动作、环境细节和构图张力。\n\
+            - “暴雨中，他跪在破碎的宫门前，手里攥着染血的玉佩。” -> 有价值。主体、环境、动作、道具、天气、状态都明确。"
+        - id: 3eec59b5-f770-4407-9a1e-4b515551e38b
+          role: user
+          text: 高光段落：{{#1778479530920.paragraph_content#}}
+        selected: false
+        title: 无价值段落过滤
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '1778480765888'
+      position:
+        x: 637.0017242431641
+        y: 148.0017318725586
+      positionAbsolute:
+        x: 637.0017242431641
+        y: 148.0017318725586
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "\ndef main(arg1: str):\n    is_valid = 1\n    if '无价值' in arg1:\n \
+          \       is_valid = 1\n    return {\n        \"is_valid\": is_valid\n   \
+          \ }\n"
+        code_language: python3
+        outputs:
+          is_valid:
+            children: null
+            type: number
+        selected: false
+        title: is_valid赋值
+        type: code
+        variables:
+        - value_selector:
+          - '1778480765888'
+          - text
+          value_type: string
+          variable: arg1
+      height: 52
+      id: '1778480914080'
+      position:
+        x: 933.3809792685386
+        y: 148.0017318725586
+      positionAbsolute:
+        x: 933.3809792685386
+        y: 148.0017318725586
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 01b863df-0493-405f-804c-9009ae02b0d3
+          role: system
+          text: "你是一名专业的“小说视觉导演”与“AI绘画提示词工程师”\n\n任务：\n\n基于给出的高光段落和段落所在章节内容，重点在高光段落，章节内容是帮你辅助理解高光段落。将高光段落转换为适用于\
+            \ GPT-image-2 的高质量生图描述 Prompt。\n\n基于高光段落输出一个：\n“可直接用于 AI 图生图”的单帧分镜 Prompt，描述要尽量精炼和准确。内容要完全忠于段落内容，不要生成段落和章节中不存在的信息。如果段落和章节中没有提及，不要捏造，没有就是没有，只提取段落和章节提及的\n\
+            \n用途：\n基于已有 IP 角色底图，\n生成符合当前高光段落剧情瞬间的小说配图。\n\n-----------------\n【核心原则】\n\
+            -----------------\n\n你必须理解：\n--不是复述小说内容，而是将文学叙事转换成“可被生图模型准确理解的视觉语言”。\n\
+            - 当前部分角色人物已有固定角色底图，无底图的请严格参考提供的画像基本信息\n- 图生图会继承角色基础外貌与服装\n- 你的职责是描述“当前段落剧情瞬间”\n\
+            - 核心重点：\n  镜头感、情绪、动作、氛围、关系张力、涉及的角色、角色/物品（实体）在当前画面中的位置关系。\n\n【转换原则】\n1.\
+            \ 不要复述文学修辞\n必须转换为可视化画面。\n错误示例：\n“他的眼神像深海一样冰冷”\n正确转换：\n“冷淡、疏离、无情的眼神，低情绪波动”\n\
+            \n2.明确视觉主体\n必须明确：\n谁是主角\n谁在前景\n谁在背景\n人物之间的位置关系\n避免：\n“他看向她”\n这种代词表达。\n\
+            必须替换为角色名字。\n\n3.强化角色视觉锚点\n每个角色包含：（以下信息如果段落和章节中没有直接提及，就为空，不要捏造，不要联想，不要发散，没有就是没有，只提取段落和章节直接提及的）\n\
+            性别（可根据他、她代词等其它方式判断）\n年龄段\n发型\n面部气质\n身材特征\n服装特征（根据章节内容描述，有的话则提取，没有请为空！！！不要自己想象，不要有任何联想！！！完全参考章节内容！！！没有的话请参考本角色底图，如果角色无底图，请根据描述生成）\n\
+            \n4.优先视觉信息，而不是剧情逻辑\n生图模型更理解：\n发型\n表情\n动作\n光影\n构图\n而不理解复杂剧情。\n因此：\n减少：\n\
+            世界观解释\n心理活动\n长对白\n抽象隐喻\n\n5.提取“单帧瞬间”\n一张图只能表现一个瞬间。\n必须选择：\n“最适合定格的一帧”。\n\
+            避免：\n时间流动\n连续动作\n多镜头拼接\n\n6.强化镜头语言\n必须补充：\n景别（近景/中景/远景）\n镜头角度\n人物构图\n\
+            空间层次\n例如：\nmedium shot\nlow angle\ncinematic composition\nforeground/background\
+            \ separation\n\n7.强化环境视觉\n需要明确：\n时间\n天气\n光线\n空气感\n色调\n空间结构\n不要只写：\n“森林”\n\
+            而要写：\n“薄雾森林、冷绿色调、阳光穿透树叶”\n\n8.强化 diffusion 稳定性\n输出内容必须：\n减少歧义\n避免代词\n\
+            避免抽象词\n避免角色串扰\n避免人物性别模糊\n多人物时：\n必须明确：\n每个角色的位置\n每个角色的动作\n每个角色的视觉特征\n\n\
+            9.输出结构固定\n必须严格按以下结构输出：\n【场景主体】\n【角色视觉设定】\n【人物位置关系】\n【动作瞬间】\n【表情与眼神】\n\
+            【镜头构图】\n【环境】\n【光影氛围】\n【画风】\n【重要约束】\n\n10.输出要求\n输出内容：\n中文\n面向 GPT-image-2\n\
+            直接可用于生图\n偏视觉描述\n不要解释\n不要分析\n不要出现“可能”\n不要出现“建议”\n不要出现思考过程\n\n11.多角色特殊规则\n\
+            如果存在多个角色：\n必须：\n防止角色外观融合\n防止性别串扰\n防止共用脸型\n防止角色主次不清\n必须明确：\n主角色\n次角色\n\
+            每个角色的视觉差异\n\n12. 如果用户提供角色参考图\n必须增加：\n“严格保持参考角色的人脸与身份一致性，\n但不要直接复用原图构图、姿势与背景。”\n\
+            \n13.固定风格\n{{#17794430447870.book_des#}}\n\n14.禁止\n\n- 血腥描写\n- 血肉外翻\n\
+            - 内脏\n- 骨折细节\n- 禁止裸露\n- 禁止擦边\n- 禁止血腥\n- 禁止新增人物\n- 禁止脑补\n- 禁止时间流动\n- 禁止多镜头拼接\n"
+        - id: 1d0396db-2552-4bad-a25c-52b982528544
+          role: user
+          text: '高光段落：{{#1778479530920.paragraph_content#}}
+
+            章节内容：{{#1778738083884.content#}}'
+        selected: false
+        title: 生成段落描述
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '1778480918522'
+      position:
+        x: 910.4407440447928
+        y: 344.0017318725586
+      positionAbsolute:
+        x: 910.4407440447928
+        y: 344.0017318725586
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "from __future__ import annotations\n\nimport re\nfrom typing import\
+          \ Optional, Tuple, Dict\nimport requests\nimport ast\n\nbase_url='https://cdn-wtzw-com.oss-cn-beijing.aliyuncs.com/highlight_gen_pic/role_pic/'\n\
+          _CONTENT_RANGE_RE = re.compile(r\"^bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)$\"\
+          , re.IGNORECASE)\n\ndef url_exists_by_range(\n    url: str,\n    timeout:\
+          \ float = 5.0,\n    allow_redirects: bool = True,\n    headers: Optional[Dict[str,\
+          \ str]] = None,\n    session: Optional[requests.Session] = None,\n) -> bool:\n\
+          \    \"\"\"\n    模拟：\n      curl -L --max-time 5 -H \"Range: bytes=0-0\"\
+          \ -o /dev/null -s -D - <url>\n\n    返回：(exists, status_code, resp_headers,\
+          \ reason)\n    \"\"\"\n    s = session or requests.Session()\n\n    h =\
+          \ {\n        \"Range\": \"bytes=0-0\",\n        \"User-Agent\": \"url-checker/1.0\"\
+          ,\n        \"Accept\": \"*/*\",\n    }\n    if headers:\n        h.update(headers)\n\
+          \n    try:\n        # stream=True：避免 requests 预读更多内容\n        r = s.get(url,\
+          \ headers=h, timeout=timeout, allow_redirects=allow_redirects, stream=True)\n\
+          \        status = r.status_code\n        resp_headers = {k: v for k, v in\
+          \ r.headers.items()}\n\n        # 1) 最理想：206 + Content-Range: bytes 0-0/total\n\
+          \        if status == 206:\n            cr = r.headers.get(\"Content-Range\"\
+          , \"\")\n            m = _CONTENT_RANGE_RE.match(cr.strip())\n         \
+          \   if not m:\n                return False\n            start, end, total\
+          \ = m.group(1), m.group(2), m.group(3)\n            if start != \"0\" or\
+          \ end != \"0\":\n                return False\n            if total.isdigit()\
+          \ and int(total) > 0:\n                return True\n            # total\
+          \ 可能是 '*'，此时也可认为存在\n            if total == \"*\":\n                return\
+          \ True\n            return False\n\n        # 2) 服务器忽略 Range 也可能返回 200（仍然算存在）\n\
+          \        if status == 200:\n            return True\n\n        # 3) 常见“存在但不支持\
+          \ Range”返回 416（需要进一步降级普通 GET/HEAD 才能确认）\n        if status == 416:\n   \
+          \         return False\n\n        # 4) 其它状态一般认为不存在/不可访问（403 可能是防盗链/鉴权，不等于不存在）\n\
+          \        return False\n\n    except requests.RequestException as e:\n  \
+          \      return False\n    finally:\n        try:\n            r.close() \
+          \ # type: ignore[name-defined]\n        except Exception:\n            pass\n\
+          def main(book_id: int, role_title: str, describe: str, chapter: int):\n\
+          \    role_base_url = 'https://cdn-wtzw-com.oss-cn-beijing.aliyuncs.com/highlight_gen_pic/book_info/'\n\
+          \    h = {\n        \"User-Agent\": \"url-checker/1.0\",\n        \"Accept\"\
+          : \"*/*\",\n    }\n    role_list = []\n    title =''\n    pattern = r\"\
+          角色:(?P<role>.+)\\s*标题:(?P<title>.+)\"\n    match = re.search(pattern, role_title)\n\
+          \    if match:\n        title = match.group(\"title\")\n        role_list\
+          \ = (match.group(\"role\")).split(',')\n    # if len(role_title.split('\\\
+          n'))>1:\n    #     temp = role_title.split('\\n')\n    #     if len(temp[0].split(':'))>1:\n\
+          \    #         role_list = temp[0].split(':')[1].split(',')\n        # if\
+          \ len(temp[1].split(':'))>1:\n        #     title = temp[1].split(':')[1]\n\
+          \    \n    role_url_describe=''\n    url_str = ''\n    role_url = []\n \
+          \   role_valid = []\n    role_info = ''\n    role_have_pic_list = []\n \
+          \   role_have_pic = ''\n    s = requests.Session()\n    if len(role_list)>0:\n\
+          \        i = 0\n        for index, value in  enumerate(role_list):\n   \
+          \         path = base_url+str(book_id)+'_'+value+'.png'\n            role_path\
+          \ = role_base_url + str(book_id) + '_role.txt'\n            if url_exists_by_range(path):\n\
+          \                i += 1\n                role_url.append(path)\n       \
+          \         role_valid.append('第'+str(i)+'张图是'+value)\n                role_have_pic_list.append(value)\n\
+          \            role_have_pic = ','.join(role_have_pic_list)\n            if\
+          \ url_exists_by_range(role_path):\n                response = s.get(role_path,\
+          \ headers=h, timeout=10, allow_redirects=True, stream=True)\n          \
+          \      if response.status_code == 200:\n                    response.encoding\
+          \ = 'utf-8'\n                    for line in response.iter_lines(decode_unicode=True):\n\
+          \                        if line:\n                            parts = line.split('\\\
+          t')\n                            if len(parts) != 2:\n                 \
+          \               continue\n                            chapter_sort, info\
+          \ = parts\n                            if int(chapter_sort) == chapter:\n\
+          \                                data_dict = ast.literal_eval(info)\n  \
+          \                              role_info = role_info + value + '(' + '年龄'+data_dict.get(value,{}).get('age','未知')\
+          \ +',性别'+ data_dict.get(value,{}).get('gender','未知')+','+data_dict.get(value,{}).get('appearance','未知')+');'\n\
+          \                \n    if len(role_url)>0:\n        url_str = '\\n'.join(role_url)\n\
+          \        role_url_describe = ';'.join(role_valid)\n    lines = describe.splitlines()\n\
+          \    #lines.insert(1,\"人物基本信息: \"+ role_info)\n    #describe = \"\\n\".join(lines)\n\
+          \    if role_have_pic == '':\n        prompt = '请根据如下小说场景描述生成一张高质量小说插画。'+\
+          \ '\\n' + describe\n    else:\n        prompt = '请根据如下小说场景与角色参考图生成一张高质量小说插画。'\
+          \ + '\\n' +'\\n'+ describe + '\\n 【角色参考图规则】\\n' +role_url_describe + '\\\
+          n请严格保持'+role_have_pic +'的人脸特征、发型、五官、气质、角色身份一致性，如果生图描述中没有服装的描述，服装也完全继承底图\
+          \ \\n 但不要直接复用原图构图、姿势、背景与镜头。\\n 除'+role_have_pic+'外，其余角色请根据文字描述重新生成。不要参考底图的外观特征，但需要参考风格\\\
+          n'\n        #prompt='请根据如下小说场景与角色参考图生成一张高质量小说插画。' + '\\n' +'\\n'+ describe\
+          \ + '【角色参考图规则】\\n' +role_url_describe + '\\n请严格保持'+role_have_pic +'的人脸特征、发型、五官、气质、角色身份一致性\
+          \ \\n 但不要直接复用原图构图、姿势、背景与镜头。\\n 除'+role_have_pic+'外，其余角色请根据文字描述重新生成。不要参考底图的外观特征，但需要参考风格\\\
+          n'\n\n\n\n\n\n    return {\n        \"role_url\": url_str,\n        \"role_list\"\
+          : role_list,\n        \"prompt\": prompt,\n        \"highlight_content\"\
+          : title\n    }"
+        code_language: python3
+        outputs:
+          highlight_content:
+            children: null
+            type: string
+          prompt:
+            children: null
+            type: string
+          role_list:
+            children: null
+            type: array[string]
+          role_url:
+            children: null
+            type: string
+        selected: false
+        title: 获取底图、画像
+        type: code
+        variables:
+        - value_selector:
+          - '1778479530920'
+          - book_id
+          value_type: number
+          variable: book_id
+        - value_selector:
+          - '17788285107480'
+          - text
+          value_type: string
+          variable: role_title
+        - value_selector:
+          - '1778480918522'
+          - text
+          value_type: string
+          variable: describe
+        - value_selector:
+          - '1778479530920'
+          - chapter_sort
+          value_type: number
+          variable: chapter
+      height: 52
+      id: '1778480992895'
+      position:
+        x: 1563.43942280907
+        y: 327.56523514684886
+      positionAbsolute:
+        x: 1563.43942280907
+        y: 327.56523514684886
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-764
+            key: ''
+            type: text
+            value: "{\n  \"app_id\": \"img2img-gen\",\n  \"inputs\": {\n    \"prompt\"\
+              : {{#1778480992895.prompt#}}\n    \"neg_prompt\": \"模糊，低分辨率，deformed\
+              \ hands, bad hands, extra fingers, missing fingers, fused fingers, twisted\
+              \ fingers, mutated hands, poorly drawn hands, bad anatomy\",\n    \"\
+              ref_image_urls\": {{#1778480992895.role_url#}},\n    \"width\": \"768\"\
+              ,\n    \"height\": \"1024\",\n    \"num_images_per_prompt\": \"1\",\n\
+              \    \"quality\": \"medium\",\n    \"output_format\": \"jpeg\",\n  \
+              \  \"gen_user\": \"system\", 60\n    \"output_compression\": 50,\n \
+              \   \"image_gen_timeout\": \"360\"\n  },\n  \"stream\": false\n}"
+          type: json
+        headers: 'accept:application/json
+
+          Content-Type:application/json'
+        method: POST
+        params: ''
+        retry_config:
+          max_retries: 1
+          retry_enabled: false
+          retry_interval: 100
+        selected: false
+        ssl_verify: false
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: HTTP 请求
+        type: http-request
+        url: https://api-ai-flow-t2.qmniu.com/api/v1/run
+        variables: []
+      height: 108
+      id: '1778563246280'
+      position:
+        x: 1157.9905800362737
+        y: 750.6210753928513
+      positionAbsolute:
+        x: 1157.9905800362737
+        y: 750.6210753928513
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: 书籍ID
+            ja_JP: 书籍ID
+            pt_BR: 书籍ID
+            zh_Hans: 书籍ID
+          label:
+            en_US: book_id
+            ja_JP: book_id
+            pt_BR: book_id
+            zh_Hans: book_id
+          llm_description: 书籍ID
+          max: null
+          min: null
+          name: book_id
+          options: []
+          placeholder:
+            en_US: ''
+            ja_JP: ''
+            pt_BR: ''
+            zh_Hans: ''
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: 起始章节（从1开始）
+            ja_JP: 起始章节（从1开始）
+            pt_BR: 起始章节（从1开始）
+            zh_Hans: 起始章节（从1开始）
+          label:
+            en_US: start_chapter
+            ja_JP: start_chapter
+            pt_BR: start_chapter
+            zh_Hans: start_chapter
+          llm_description: 起始章节（从1开始）
+          max: null
+          min: null
+          name: start_chapter
+          options: []
+          placeholder:
+            en_US: ''
+            ja_JP: ''
+            pt_BR: ''
+            zh_Hans: ''
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: 结束章节
+            ja_JP: 结束章节
+            pt_BR: 结束章节
+            zh_Hans: 结束章节
+          label:
+            en_US: end_chapter
+            ja_JP: end_chapter
+            pt_BR: end_chapter
+            zh_Hans: end_chapter
+          llm_description: 结束章节
+          max: null
+          min: null
+          name: end_chapter
+          options: []
+          placeholder:
+            en_US: ''
+            ja_JP: ''
+            pt_BR: ''
+            zh_Hans: ''
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: ''
+            ja_JP: ''
+            pt_BR: ''
+            zh_Hans: ''
+          label:
+            en_US: item_type
+            ja_JP: item_type
+            pt_BR: item_type
+            zh_Hans: item_type
+          llm_description: ''
+          max: null
+          min: null
+          name: item_type
+          options: []
+          placeholder:
+            en_US: ''
+            ja_JP: ''
+            pt_BR: ''
+            zh_Hans: ''
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: number
+        params:
+          book_id: ''
+          end_chapter: ''
+          item_type: ''
+          start_chapter: ''
+        plugin_id: null
+        plugin_unique_identifier: null
+        provider_icon:
+          background: '#E6F4D7'
+          content: book
+        provider_id: 1f1d0a7c-eedb-446e-be0e-a887b71cd1db
+        provider_name: 获取书库书籍章节内容
+        provider_type: workflow
+        selected: false
+        title: 获取书库书籍章节内容
+        tool_configurations:
+          book_id:
+            type: variable
+            value:
+            - '1778479530920'
+            - book_id
+          end_chapter:
+            type: variable
+            value:
+            - '1778479530920'
+            - chapter_sort
+          start_chapter:
+            type: variable
+            value:
+            - '1778479530920'
+            - chapter_sort
+        tool_description: 根据书籍ID、起始章节和结束张杰获取书库书籍相应章节的内容
+        tool_label: 获取书库书籍章节内容
+        tool_name: get_book_chapter_content
+        tool_node_version: '2'
+        tool_parameters:
+          item_type:
+            type: constant
+            value: 1
+        type: tool
+      height: 140
+      id: '1778738083884'
+      position:
+        x: 340.34110513050825
+        y: 148.0017318725586
+      positionAbsolute:
+        x: 340.34110513050825
+        y: 148.0017318725586
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: Base64 encoded image string, default convert to PNG, support PNG
+              ("data:image/png;base64" prefix) and JPG ("data:image/jpeg;base64" prefix),
+              multiple output files are supported when using the delimiter
+            ja_JP: Base64 encoded image string, default convert to PNG, support PNG
+              ("data:image/png;base64" prefix) and JPG ("data:image/jpeg;base64" prefix),
+              multiple output files are supported when using the delimiter
+            pt_BR: Base64 encoded image string, default convert to PNG, support PNG
+              ("data:image/png;base64" prefix) and JPG ("data:image/jpeg;base64" prefix),
+              multiple output files are supported when using the delimiter
+            zh_Hans: Base64 编码的图片字符串，默认转为PNG格式，支持PNG格式（data:image/png;base64开头）及JPG格式（data:image/jpeg;base64开头）,
+              支持使用分隔符分割多个文件
+          label:
+            en_US: Base64 encoded Text
+            ja_JP: Base64 encoded Text
+            pt_BR: Base64 encoded Text
+            zh_Hans: 已 Base64 编码的图片字符串
+          llm_description: A tool for decoding Base64-encoded text to image file
+          max: null
+          min: null
+          name: encoded_text
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: Optional output filename(s), one per line.
+            ja_JP: Optional output filename(s), one per line.
+            pt_BR: Optional output filename(s), one per line.
+            zh_Hans: 每行一个，非必填。
+          label:
+            en_US: Filename of the output file
+            ja_JP: Filename of the output file
+            pt_BR: Filename of the output file
+            zh_Hans: 输出文件名
+          llm_description: ''
+          max: null
+          min: null
+          name: output_filename
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: '
+
+
+            '
+          form: llm
+          human_description:
+            en_US: Support multiple segments of Base64 encoded text, split by the
+              delimiter and decode them into multiple files sequentially
+            ja_JP: Support multiple segments of Base64 encoded text, split by the
+              delimiter and decode them into multiple files sequentially
+            pt_BR: Support multiple segments of Base64 encoded text, split by the
+              delimiter and decode them into multiple files sequentially
+            zh_Hans: 支持多段Base64编码文本，按分隔符拆分后依次解码为多个文件
+          label:
+            en_US: Delimiter
+            ja_JP: Delimiter
+            pt_BR: Delimiter
+            zh_Hans: 分隔符
+          llm_description: A tool for decoding Base64-encoded text to file file
+          max: null
+          min: null
+          name: splitter_str
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        params:
+          encoded_text: ''
+          output_filename: ''
+          splitter_str: ''
+        plugin_id: bowenliang123/base64_codec
+        plugin_unique_identifier: bowenliang123/base64_codec:1.0.1@034fdfa9602a2b207c0009adecb8998344dbb4f74a223c88680b477c83ee783b
+        provider_icon: /console/api/workspaces/current/plugin/icon?tenant_id=e807ab57-72b7-4603-8efb-9e7b03392600&filename=cebbda2083c25c484bb939ab05f656c605dfabd2f0ca9c42f767737052b4977a.png
+        provider_id: bowenliang123/base64_codec/base64_codec
+        provider_name: bowenliang123/base64_codec/base64_codec
+        provider_type: builtin
+        selected: false
+        title: Base64 ⮕ 图片文件
+        tool_configurations: {}
+        tool_description: 将 Base64 编码文本转为 图片文件
+        tool_label: Base64 ⮕ 图片文件
+        tool_name: base64_image_decoder
+        tool_node_version: '2'
+        tool_parameters:
+          encoded_text:
+            type: mixed
+            value: '{{#1778824781665.result#}}'
+          output_filename:
+            type: mixed
+            value: ''
+          splitter_str:
+            type: mixed
+            value: \n\n
+        type: tool
+      height: 52
+      id: '1778744029960'
+      position:
+        x: 1222.9476331237256
+        y: 1209.271650825001
+      positionAbsolute:
+        x: 1222.9476331237256
+        y: 1209.271650825001
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "\nimport json\ndef main(arg1: str):\n    json_arg = json.loads(arg1)\n\
+          \    mime_type = \"image/png\"\n    image_b64=json_arg['output']['images_b64']\n\
+          \    markdown_image = f\"![生成的图片](data:{mime_type};base64,{image_b64[0]})\"\
+          \n    return {\n        \"result\": image_b64[0],\n        \"markdown_output\"\
+          :markdown_image\n    }\n"
+        code_language: python3
+        outputs:
+          markdown_output:
+            children: null
+            type: string
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 获取base64
+        type: code
+        variables:
+        - value_selector:
+          - '1778563246280'
+          - body
+          value_type: string
+          variable: arg1
+      height: 52
+      id: '1778824781665'
+      position:
+        x: 1217.3220531469583
+        y: 1072.9868665232368
+      positionAbsolute:
+        x: 1217.3220531469583
+        y: 1072.9868665232368
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 01b863df-0493-405f-804c-9009ae02b0d3
+          role: system
+          text: '你是一名爆款小说运营编辑。
+
+
+            请先分析：
+
+            1. 当前画面涉及哪些角色
+
+            2. 当前画面的主角是谁
+
+            3. 主角处于什么情绪
+
+            4. 当前最大的剧情冲突是什么
+
+
+            然后根据分析结果生成标题和提取所有角色
+
+
+            #配图文案任务
+
+            提炼一句：真正具有“高光感”的配图文案。
+
+            这句话要让读者看到后，
+
+            瞬间重新进入这一幕。
+
+            【核心要求】
+
+            不是过多解释发生了什么，但标题也不要偏离实际画面内容
+
+            重点是传递：
+
+            - 情绪
+
+            - 人物关系
+
+            - 氛围
+
+            - 压迫感
+
+            - 宿命感
+
+            - 孤独感
+
+            - 心动感
+
+            - 悲凉感
+
+            - 震撼感
+
+
+            文案要像：
+
+            “这一幕被记住的那句话”。
+
+
+            【风格要求】
+
+            - 克制
+
+            - 有文学感
+
+            - 有余味
+
+            - 有画面感
+
+            - 不矫情
+
+            - 不鸡汤
+
+            - 不像 AI 解说
+
+            - 不像短视频标题
+
+            - 不喊口号
+
+
+            【长度要求】
+
+
+            - 控制在 20 字左右
+
+            - 尽量精炼
+
+            - 不写长句
+
+            - 优先短句
+
+
+            #角色名称提取任务：
+
+            提取配图画面中涉及到的所有人物全名，不要有任何遗落，只要出现过的都要提取。
+
+
+            如果片段中只出现：
+
+            - 他
+
+            - 她
+
+            - 少年
+
+            - 男人
+
+            - 师父
+
+            等代称，
+
+            必须根据【当前配图画面描述】
+
+            推断角色真实全名后输出。
+
+            禁止只使用泛称。
+
+            【角色限制】
+
+            - 只允许使用当前片段实际出现的角色
+
+            - 不要引入未出场角色
+
+            - 不要脑补剧情外人物
+
+            【排除干扰】
+
+            不要提取：
+
+
+            - 地点
+
+            - 功法
+
+            - 武器
+
+            - 组织
+
+            - 境界
+
+            - 物品
+
+            - 世界观设定
+
+
+            等非角色实体。
+
+
+            文案【禁止事项】
+
+            不要：
+
+            - 平铺直叙描述动作
+
+            - 总结剧情
+
+            - 剧透后续
+
+            - 解释设定
+
+            - 写成营销文案
+
+            - 写成旁白解说
+
+            【错误示例】
+
+            1.阿良摘下斗笠和陈平安打招呼
+
+            2.两人正式相遇
+
+            3.大战即将开始
+
+            4.命运的齿轮开始转动
+
+            【正确方向】
+
+            1.阿良走进泥瓶巷后，陈平安的人生变了
+
+            2.宁姚替陈平安拦下了整个世界
+
+            3.那一拳前，陈平安已经输了半条命
+
+            4.很多年后，陈平安还记得那个雪夜
+
+            ✓ 陈平安第一次知道，世上真有剑客
+
+
+            【输入内容】
+
+            高光段落
+
+            当前配图画面描述
+
+
+            【输出要求】
+
+            输出格式：角色请直接以列表形式输出角色名，不要包含任何多余的解释或废话。描述内容请直接以直接输出描述内容，不要有其他解释和废话。
+
+            输出结果实例，请严格按照如下格式：
+
+            角色:陈平安,阿良（在此处列出角色名，多个用“,”隔开，如果没有则为空）
+
+            标题:陈平安第一次知道，世上真有剑客
+
+
+            不要解释。
+
+            不要分析。
+
+            不要输出多个候选。
+
+            不要加引号。'
+        - id: 1d0396db-2552-4bad-a25c-52b982528544
+          role: user
+          text: '高光段落：{{#1778479530920.paragraph_content#}}
+
+            当前配图画面描述：{{#1778480918522.text#}}'
+        selected: false
+        title: 获取生图角色和标题
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '17788285107480'
+      position:
+        x: 1247.810175368324
+        y: 327.56523514684886
+      positionAbsolute:
+        x: 1247.810175368324
+        y: 327.56523514684886
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        outputs:
+        - value_selector:
+          - '1778480992895'
+          - role_list
+          value_type: array[string]
+          variable: role
+        - value_selector:
+          - '1778480992895'
+          - highlight_content
+          value_type: string
+          variable: title
+        - value_selector:
+          - '1778744029960'
+          - files
+          value_type: array[file]
+          variable: result
+        selected: false
+        title: 输出
+        type: end
+      height: 140
+      id: '1779084959324'
+      position:
+        x: 1563.43942280907
+        y: 1209.271650825001
+      positionAbsolute:
+        x: 1563.43942280907
+        y: 1209.271650825001
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: fefc0b52-05f4-409a-9103-3078cdb58ede
+            value: '1'
+            varType: number
+            variable_selector:
+            - '1778480914080'
+            - is_valid
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 条件分支
+        type: if-else
+      height: 124
+      id: '1779355317443'
+      position:
+        x: 1222.9476331237256
+        y: 123.91013223847494
+      positionAbsolute:
+        x: 1222.9476331237256
+        y: 123.91013223847494
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        outputs:
+        - value_selector:
+          - '1778480914080'
+          - is_valid
+          value_type: number
+          variable: is_valid
+        selected: false
+        title: 输出 2
+        type: end
+      height: 88
+      id: '1779355349021'
+      position:
+        x: 1546.7424049685312
+        y: 191.23975962077077
+      positionAbsolute:
+        x: 1546.7424049685312
+        y: 191.23975962077077
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "from __future__ import annotations\n\nimport re\nfrom typing import\
+          \ Optional, Tuple, Dict\nimport requests\n\nbase_url='https://cdn-wtzw-com.oss-cn-beijing.aliyuncs.com/highlight_gen_pic/book_info/'\n\
+          _CONTENT_RANGE_RE = re.compile(r\"^bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)$\"\
+          , re.IGNORECASE)\n\ndef url_exists_by_range(\n    url: str,\n    timeout:\
+          \ float = 5.0,\n    allow_redirects: bool = True,\n    headers: Optional[Dict[str,\
+          \ str]] = None,\n    session: Optional[requests.Session] = None,\n) -> bool:\n\
+          \    \"\"\"\n    模拟：\n      curl -L --max-time 5 -H \"Range: bytes=0-0\"\
+          \ -o /dev/null -s -D - <url>\n\n    返回：(exists, status_code, resp_headers,\
+          \ reason)\n    \"\"\"\n    s = session or requests.Session()\n\n    h =\
+          \ {\n        \"Range\": \"bytes=0-0\",\n        \"User-Agent\": \"url-checker/1.0\"\
+          ,\n        \"Accept\": \"*/*\",\n    }\n    if headers:\n        h.update(headers)\n\
+          \n    try:\n        # stream=True：避免 requests 预读更多内容\n        r = s.get(url,\
+          \ headers=h, timeout=timeout, allow_redirects=allow_redirects, stream=True)\n\
+          \        status = r.status_code\n        resp_headers = {k: v for k, v in\
+          \ r.headers.items()}\n\n        # 1) 最理想：206 + Content-Range: bytes 0-0/total\n\
+          \        if status == 206:\n            cr = r.headers.get(\"Content-Range\"\
+          , \"\")\n            m = _CONTENT_RANGE_RE.match(cr.strip())\n         \
+          \   if not m:\n                return False\n            start, end, total\
+          \ = m.group(1), m.group(2), m.group(3)\n            if start != \"0\" or\
+          \ end != \"0\":\n                return False\n            if total.isdigit()\
+          \ and int(total) > 0:\n                return True\n            # total\
+          \ 可能是 '*'，此时也可认为存在\n            if total == \"*\":\n                return\
+          \ True\n            return False\n\n        # 2) 服务器忽略 Range 也可能返回 200（仍然算存在）\n\
+          \        if status == 200:\n            return True\n\n        # 3) 常见“存在但不支持\
+          \ Range”返回 416（需要进一步降级普通 GET/HEAD 才能确认）\n        if status == 416:\n   \
+          \         return False\n\n        # 4) 其它状态一般认为不存在/不可访问（403 可能是防盗链/鉴权，不等于不存在）\n\
+          \        return False\n\n    except requests.RequestException as e:\n  \
+          \      return False\n    finally:\n        try:\n            r.close() \
+          \ # type: ignore[name-defined]\n        except Exception:\n            pass\n\
+          def main(book_id: int):\n    h = {\n        \"User-Agent\": \"url-checker/1.0\"\
+          ,\n        \"Accept\": \"*/*\",\n    }\n\n    url = base_url+'book_'+str(book_id)+'_info.txt'\n\
+          \    s = requests.Session()\n    des = ''\n    response = s.get(url, headers=h,\
+          \ timeout=10, allow_redirects=True, stream=True)\n    if(url_exists_by_range(url)):\n\
+          \        if response.status_code == 200:\n            response.encoding\
+          \ = 'utf-8'  \n            des = response.text\n\n    return {\n       \
+          \ \"book_des\": des\n    }"
+        code_language: python3
+        outputs:
+          book_des:
+            children: null
+            type: string
+        selected: false
+        title: 获取书籍描述
+        type: code
+        variables:
+        - value_selector:
+          - '1778479530920'
+          - book_id
+          value_type: number
+          variable: book_id
+      height: 52
+      id: '17794430447870'
+      position:
+        x: 615.0642593854313
+        y: 344.0017318725586
+      positionAbsolute:
+        x: 615.0642593854313
+        y: 344.0017318725586
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: -167.7485063563081
+      y: 15.727075966464099
+      zoom: 0.6878706358529582
+  rag_pipeline_variables: []
