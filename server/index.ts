@@ -43,6 +43,7 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT ?? 5174);
+const host = process.env.HOST ?? '127.0.0.1';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -542,6 +543,6 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(500).json({ error: message });
 });
 
-app.listen(port, '127.0.0.1', () => {
-  console.log(`Dify batch server listening at http://127.0.0.1:${port}`);
+app.listen(port, host, () => {
+  console.log(`Dify batch server listening at http://${host}:${port}`);
 });
