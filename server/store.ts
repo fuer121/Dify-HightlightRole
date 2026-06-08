@@ -87,6 +87,13 @@ function withTransaction(work: () => void) {
   }
 }
 
+function columnExists(table: string, column: string) {
+  const row = getDb()
+    .prepare(`SELECT 1 AS present FROM pragma_table_info('${table}') WHERE name = ? LIMIT 1`)
+    .get(column) as SqlRow | undefined;
+  return row?.present === 1;
+}
+
 export function initializeStore() {
   const database = db ?? getDb();
   database.exec(`
@@ -169,6 +176,7 @@ export function initializeStore() {
       elapsed_seconds REAL,
       workflow_run_id TEXT,
       dify_task_id TEXT,
+      is_valid_json TEXT,
       result_files_json TEXT NOT NULL DEFAULT '[]',
       result_text TEXT,
       raw_outputs_json TEXT,
@@ -209,6 +217,9 @@ export function initializeStore() {
         updated_at = datetime('now')
     WHERE status = 'running';
   `);
+  if (!columnExists('task_runs', 'is_valid_json')) {
+    database.exec('ALTER TABLE task_runs ADD COLUMN is_valid_json TEXT');
+  }
 }
 
 function upsertBook(bookId: number, name?: string) {
@@ -438,10 +449,10 @@ export function recordTaskRun(task: BatchTask) {
       `
       INSERT INTO task_runs (
         id, task_id, attempt_no, status, started_at, finished_at, elapsed_seconds,
-        workflow_run_id, dify_task_id, result_files_json, result_text, raw_outputs_json,
-        error, created_at
+        workflow_run_id, dify_task_id, is_valid_json, result_files_json, result_text,
+        raw_outputs_json, error, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -454,6 +465,7 @@ export function recordTaskRun(task: BatchTask) {
       task.elapsed_seconds ?? null,
       task.workflow_run_id ?? null,
       task.dify_task_id ?? null,
+      task.is_valid === undefined ? null : json(task.is_valid),
       json(task.result_files),
       task.result_text ?? null,
       task.raw_outputs === undefined ? null : json(task.raw_outputs),
@@ -750,22 +762,29 @@ export function listTaskRuns(taskId: string): TaskRunRecord[] {
   return getDb()
     .prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY created_at DESC')
     .all(taskId)
-    .map((row): TaskRunRecord => ({
-      id: String(row.id),
-      task_id: String(row.task_id),
-      attempt_no: Number(row.attempt_no),
-      status: row.status as TaskStatus,
-      started_at: optionalString(row.started_at),
-      finished_at: optionalString(row.finished_at),
-      elapsed_seconds: optionalNumber(row.elapsed_seconds),
-      workflow_run_id: optionalString(row.workflow_run_id),
-      dify_task_id: optionalString(row.dify_task_id),
-      result_files: parseJson<ResultFile[]>(row.result_files_json, []),
-      result_text: optionalString(row.result_text),
-      raw_outputs: parseJson(row.raw_outputs_json, undefined),
-      error: optionalString(row.error),
-      created_at: String(row.created_at)
-    }));
+    .map((row): TaskRunRecord => {
+      const resultFiles = parseJson<ResultFile[]>(row.result_files_json, []);
+      for (const file of resultFiles) {
+        registerStoredFile(file);
+      }
+      return {
+        id: String(row.id),
+        task_id: String(row.task_id),
+        attempt_no: Number(row.attempt_no),
+        status: row.status as TaskStatus,
+        started_at: optionalString(row.started_at),
+        finished_at: optionalString(row.finished_at),
+        elapsed_seconds: optionalNumber(row.elapsed_seconds),
+        workflow_run_id: optionalString(row.workflow_run_id),
+        dify_task_id: optionalString(row.dify_task_id),
+        is_valid: parseJson(row.is_valid_json, undefined),
+        result_files: resultFiles,
+        result_text: optionalString(row.result_text),
+        raw_outputs: parseJson(row.raw_outputs_json, undefined),
+        error: optionalString(row.error),
+        created_at: String(row.created_at)
+      };
+    });
 }
 
 export function createManualTask(input: BatchTask['input']) {

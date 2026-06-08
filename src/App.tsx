@@ -23,6 +23,7 @@ import {
   Upload,
   XCircle
 } from 'lucide-react';
+import { getRunIsValidValue } from './runIsValid';
 
 type RequiredInputKey = 'book_id' | 'paragraph_content' | 'chapter_sort';
 type Mapping = Record<RequiredInputKey, string>;
@@ -142,6 +143,7 @@ interface TaskRunRecord {
   elapsed_seconds?: number;
   workflow_run_id?: string;
   dify_task_id?: string;
+  is_valid?: unknown;
   result_files: ResultFile[];
   result_text?: string;
   raw_outputs?: unknown;
@@ -349,6 +351,20 @@ function taskListPageSize(taskCount?: number): TaskPageSize {
 }
 
 type RangeFilterState = typeof DEFAULT_RANGE_FILTER_STATE;
+type TaskQueryState = RangeFilterState & {
+  statusFilter: StatusFilter;
+  taskQuery: string;
+  hasImage: ImagePresenceFilter;
+  valueStatus: ValueStatusFilter;
+};
+
+const DEFAULT_TASK_QUERY_STATE: TaskQueryState = {
+  ...DEFAULT_RANGE_FILTER_STATE,
+  statusFilter: 'all',
+  taskQuery: '',
+  hasImage: 'all',
+  valueStatus: 'all'
+};
 
 const qualityStatusLabel: Record<QualityRunStatus, string> = {
   idle: '待执行',
@@ -516,6 +532,57 @@ function saveBookTaskColumnWidths(widths: BookTaskColumnWidths) {
   } catch {
     // Some embedded browser contexts can block localStorage; resizing should still work for the current session.
   }
+}
+
+function buildTaskQueryState(
+  draft: TaskQueryState,
+  overrides: TaskQueryOverrides = {}
+): TaskQueryState {
+  return {
+    mode: overrides.mode ?? draft.mode,
+    chapterFrom: overrides.chapterFrom ?? draft.chapterFrom,
+    chapterTo: overrides.chapterTo ?? draft.chapterTo,
+    rowNoFrom: overrides.rowNoFrom ?? draft.rowNoFrom,
+    rowNoTo: overrides.rowNoTo ?? draft.rowNoTo,
+    statusFilter: overrides.statusFilter ?? draft.statusFilter,
+    taskQuery: overrides.taskQuery ?? draft.taskQuery,
+    hasImage: overrides.hasImage ?? draft.hasImage,
+    valueStatus: overrides.valueStatus ?? draft.valueStatus
+  };
+}
+
+function createTaskQueryParams(queryState: TaskQueryState, page: number, pageSize: number, taskListId: string) {
+  const params = new URLSearchParams();
+  if (queryState.statusFilter !== 'all') params.set('status', queryState.statusFilter);
+  if (taskListId !== 'all') params.set('batchId', taskListId);
+  if (queryState.taskQuery.trim()) params.set('q', queryState.taskQuery.trim());
+  if (queryState.mode === 'chapter') {
+    if (queryState.chapterFrom.trim()) params.set('chapterSortFrom', queryState.chapterFrom.trim());
+    if (queryState.chapterTo.trim()) params.set('chapterSortTo', queryState.chapterTo.trim());
+  } else {
+    if (queryState.rowNoFrom.trim()) params.set('rowNoFrom', queryState.rowNoFrom.trim());
+    if (queryState.rowNoTo.trim()) params.set('rowNoTo', queryState.rowNoTo.trim());
+  }
+  if (queryState.hasImage !== 'all') params.set('hasImage', queryState.hasImage);
+  if (queryState.valueStatus !== 'all') params.set('valueStatus', queryState.valueStatus);
+  params.set('page', String(page));
+  params.set('pageSize', String(pageSize));
+  return params;
+}
+
+function describeTaskQueryScope(queryState: TaskQueryState) {
+  const fragments: string[] = [];
+  if (queryState.statusFilter !== 'all') fragments.push(`状态 ${statusLabel[queryState.statusFilter]}`);
+  if (queryState.hasImage !== 'all') fragments.push(`图片 ${imageStatusLabel(queryState.hasImage)}`);
+  if (queryState.valueStatus !== 'all') fragments.push(`价值 ${valueStatusLabel(queryState.valueStatus)}`);
+  if (queryState.mode === 'chapter' && (queryState.chapterFrom.trim() || queryState.chapterTo.trim())) {
+    fragments.push(`章节 ${queryState.chapterFrom.trim() || '-'}-${queryState.chapterTo.trim() || '-'}`);
+  }
+  if (queryState.mode === 'row' && (queryState.rowNoFrom.trim() || queryState.rowNoTo.trim())) {
+    fragments.push(`行号 ${queryState.rowNoFrom.trim() || '-'}-${queryState.rowNoTo.trim() || '-'}`);
+  }
+  if (queryState.taskQuery.trim()) fragments.push(`关键词 ${queryState.taskQuery.trim()}`);
+  return fragments.length === 0 ? '当前任务清单全部任务' : fragments.join(' / ');
 }
 
 export function App() {
@@ -1458,6 +1525,49 @@ function RawValue({ value, compact = false }: { value: unknown; compact?: boolea
   return <span className={`raw-value ${text === '-' ? 'empty' : ''} ${compact ? 'compact' : ''}`}>{text}</span>;
 }
 
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function runOutputField(run: TaskRunRecord, key: string) {
+  return asObject(run.raw_outputs)?.[key];
+}
+
+function runOutputString(run: TaskRunRecord, key: string) {
+  const value = runOutputField(run, key);
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function runTitle(run: TaskRunRecord) {
+  const title = runOutputString(run, 'title');
+  if (title) return title;
+  if (!run.result_text) return '暂无标题';
+  return truncate(run.result_text.replace(/\s+/g, ' '), 40);
+}
+
+function runDescription(run: TaskRunRecord) {
+  const paragraphDescription = runOutputString(run, 'paragraph_description');
+  if (paragraphDescription) return paragraphDescription;
+  const description = runOutputString(run, 'description');
+  if (description) return description;
+  if (!run.result_text) return undefined;
+  return truncate(run.result_text.replace(/\s+/g, ' '), 80);
+}
+
+function runIsValid(run: TaskRunRecord) {
+  const value = getRunIsValidValue(run);
+  return value === undefined ? '-' : formatRawValue(value);
+}
+
+function imageStatusLabel(value: ImagePresenceFilter) {
+  return value === 'yes' ? '有图' : value === 'no' ? '无图' : '全部图片';
+}
+
+function valueStatusLabel(value: ValueStatusFilter) {
+  return value === 'valuable' ? '有价值' : value === 'not_valuable' ? '无价值' : value === 'unknown' ? '未知' : '全部价值';
+}
+
 function TaskActions({ task, onAction }: { task: BatchTask; onAction: (action: 'pause' | 'retry' | 'delete') => void }) {
   const validationFailed = task.error?.startsWith('字段校验失败') ?? false;
   const canPause = task.status === 'queued' || task.status === 'running';
@@ -1530,6 +1640,7 @@ function BooksManagementPage({
   const [tasks, setTasks] = useState<BatchTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [runs, setRuns] = useState<TaskRunRecord[]>([]);
+  const [compareRunIds, setCompareRunIds] = useState<string[]>([]);
   const [taskQuery, setTaskQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [chapterFrom, setChapterFrom] = useState('');
@@ -1540,6 +1651,7 @@ function BooksManagementPage({
   const [isRangeFilterOpen, setRangeFilterOpen] = useState(false);
   const [rowNoFrom, setRowNoFrom] = useState('');
   const [rowNoTo, setRowNoTo] = useState('');
+  const [appliedTaskQueryState, setAppliedTaskQueryState] = useState<TaskQueryState>(DEFAULT_TASK_QUERY_STATE);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState<TaskPageSize>(50);
   const [taskPagination, setTaskPagination] = useState<TaskPagination>({
@@ -1566,12 +1678,16 @@ function BooksManagementPage({
   const activeColumnResizeRef = useRef<BookTaskColumnKey | null>(null);
   const batchUploadInputRef = useRef<HTMLInputElement | null>(null);
   const rangeFilterRef = useRef<HTMLDivElement | null>(null);
-  const rangeFilterByTaskListRef = useRef<Record<string, RangeFilterState>>({});
+  const appliedTaskQueryStateByScopeRef = useRef<Record<string, TaskQueryState>>({});
 
   const selectedBook = useMemo(() => books.find((book) => book.book_id === selectedBookId) ?? books[0], [books, selectedBookId]);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks.find((task) => task.result_files.length > 0) ?? tasks[0],
     [selectedTaskId, tasks]
+  );
+  const compareRuns = useMemo(
+    () => compareRunIds.map((runId) => runs.find((run) => run.id === runId)).filter((run): run is TaskRunRecord => Boolean(run)),
+    [compareRunIds, runs]
   );
   const selectedBatch = useMemo(() => batches.find((batch) => batch.id === selectedBatchId), [batches, selectedBatchId]);
   const isAllTaskListView = selectedBatchId === 'all';
@@ -1585,6 +1701,7 @@ function BooksManagementPage({
     if (!rowNoFrom.trim() && !rowNoTo.trim()) return '按行数';
     return `行 ${rowNoFrom.trim() || '-'}-${rowNoTo.trim() || '-'}`;
   }, [chapterFrom, chapterTo, rangeFilterMode, rowNoFrom, rowNoTo]);
+  const continueScopeText = useMemo(() => describeTaskQueryScope(appliedTaskQueryState), [appliedTaskQueryState]);
   const taskTableMinWidth = useMemo(
     () => BOOK_TASK_COLUMN_CONFIG.reduce((total, column) => total + taskColumnWidths[column.key], 0),
     [taskColumnWidths]
@@ -1617,6 +1734,10 @@ function BooksManagementPage({
     return `${bookId ?? 'none'}:${taskListId}`;
   }
 
+  function taskQueryStateForScope(bookId = selectedBook?.book_id, taskListId = selectedBatchId): TaskQueryState {
+    return appliedTaskQueryStateByScopeRef.current[rangeFilterScopeKey(bookId, taskListId)] ?? DEFAULT_TASK_QUERY_STATE;
+  }
+
   function currentRangeFilterState(): RangeFilterState {
     return {
       mode: rangeFilterMode,
@@ -1624,6 +1745,16 @@ function BooksManagementPage({
       chapterTo,
       rowNoFrom,
       rowNoTo
+    };
+  }
+
+  function currentTaskQueryState(): TaskQueryState {
+    return {
+      ...currentRangeFilterState(),
+      statusFilter,
+      taskQuery,
+      hasImage,
+      valueStatus
     };
   }
 
@@ -1635,10 +1766,21 @@ function BooksManagementPage({
     setRowNoTo(state.rowNoTo);
   }
 
+  function applyTaskQueryState(state: TaskQueryState) {
+    setStatusFilter(state.statusFilter);
+    setTaskQuery(state.taskQuery);
+    setHasImage(state.hasImage);
+    setValueStatus(state.valueStatus);
+    applyRangeFilterState(state);
+  }
+
   function switchTaskScope(nextBookId = selectedBook?.book_id, nextTaskListId = selectedBatchId) {
-    rangeFilterByTaskListRef.current[rangeFilterScopeKey()] = currentRangeFilterState();
-    applyRangeFilterState(rangeFilterByTaskListRef.current[rangeFilterScopeKey(nextBookId, nextTaskListId)] ?? DEFAULT_RANGE_FILTER_STATE);
+    appliedTaskQueryStateByScopeRef.current[rangeFilterScopeKey()] = appliedTaskQueryState;
+    const nextQueryState = taskQueryStateForScope(nextBookId, nextTaskListId);
+    applyTaskQueryState(nextQueryState);
+    setAppliedTaskQueryState(nextQueryState);
     setRangeFilterOpen(false);
+    return nextQueryState;
   }
 
   function pageSizeForScope(taskListId = selectedBatchId, book = selectedBook) {
@@ -1670,41 +1812,13 @@ function BooksManagementPage({
     });
   }
 
-  function taskQueryParams(page = taskPage, pageSize = taskPageSize, taskListId = selectedBatchId, overrides: TaskQueryOverrides = {}) {
-    const params = new URLSearchParams();
-    const nextStatusFilter = overrides.statusFilter ?? statusFilter;
-    const nextTaskQuery = overrides.taskQuery ?? taskQuery;
-    const nextRangeFilterMode = overrides.mode ?? rangeFilterMode;
-    const nextChapterFrom = overrides.chapterFrom ?? chapterFrom;
-    const nextChapterTo = overrides.chapterTo ?? chapterTo;
-    const nextRowNoFrom = overrides.rowNoFrom ?? rowNoFrom;
-    const nextRowNoTo = overrides.rowNoTo ?? rowNoTo;
-    const nextHasImage = overrides.hasImage ?? hasImage;
-    const nextValueStatus = overrides.valueStatus ?? valueStatus;
-
-    if (nextStatusFilter !== 'all') params.set('status', nextStatusFilter);
-    if (taskListId !== 'all') params.set('batchId', taskListId);
-    if (nextTaskQuery.trim()) params.set('q', nextTaskQuery.trim());
-    if (nextRangeFilterMode === 'chapter') {
-      if (nextChapterFrom.trim()) params.set('chapterSortFrom', nextChapterFrom.trim());
-      if (nextChapterTo.trim()) params.set('chapterSortTo', nextChapterTo.trim());
-    } else {
-      if (nextRowNoFrom.trim()) params.set('rowNoFrom', nextRowNoFrom.trim());
-      if (nextRowNoTo.trim()) params.set('rowNoTo', nextRowNoTo.trim());
-    }
-    if (nextHasImage !== 'all') params.set('hasImage', nextHasImage);
-    if (nextValueStatus !== 'all') params.set('valueStatus', nextValueStatus);
-    params.set('page', String(page));
-    params.set('pageSize', String(pageSize));
-    return params;
-  }
-
   async function loadBookTasks(
     bookId = selectedBook?.book_id,
     page = taskPage,
     taskListId = selectedBatchId,
     overrides: TaskQueryOverrides = {},
-    pageSize = taskPageSize
+    pageSize = taskPageSize,
+    baseQueryState = taskQueryStateForScope(bookId, taskListId)
   ) {
     if (!bookId) {
       setTasks([]);
@@ -1714,12 +1828,15 @@ function BooksManagementPage({
     setLoadingTasks(true);
     setError(null);
     try {
-      const params = taskQueryParams(page, pageSize, taskListId, overrides);
+      const nextQueryState = buildTaskQueryState(baseQueryState, overrides);
+      const params = createTaskQueryParams(nextQueryState, page, pageSize, taskListId);
       const payload = await fetch(`/api/books/${bookId}/tasks?${params.toString()}`).then((response) =>
         readJson<{ tasks: BatchTask[]; pagination: TaskPagination }>(response)
       );
       setTasks(payload.tasks);
       setTaskPagination(payload.pagination);
+      appliedTaskQueryStateByScopeRef.current[rangeFilterScopeKey(bookId, taskListId)] = nextQueryState;
+      setAppliedTaskQueryState(nextQueryState);
       if (payload.pagination.page !== taskPage) {
         setTaskPage(payload.pagination.page);
       }
@@ -1734,13 +1851,16 @@ function BooksManagementPage({
   async function loadRuns(taskId = selectedTask?.id) {
     if (!taskId) {
       setRuns([]);
+      setCompareRunIds([]);
       return;
     }
     try {
       const payload = await fetch(`/api/tasks/${taskId}/runs`).then((response) => readJson<{ runs: TaskRunRecord[] }>(response));
       setRuns(payload.runs);
+      setCompareRunIds((current) => current.filter((runId) => payload.runs.some((run) => run.id === runId)));
     } catch {
       setRuns([]);
+      setCompareRunIds([]);
     }
   }
 
@@ -1819,29 +1939,41 @@ function BooksManagementPage({
 
   async function searchTasks() {
     setTaskPage(1);
-    await loadBookTasks(selectedBook?.book_id, 1);
+    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, {}, taskPageSize, currentTaskQueryState());
   }
 
   async function applyRangeFilterSearch() {
+    const nextQueryState = buildTaskQueryState(appliedTaskQueryState, currentRangeFilterState());
+    applyTaskQueryState(nextQueryState);
     setRangeFilterOpen(false);
     setTaskPage(1);
-    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, currentRangeFilterState());
+    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, {}, taskPageSize, nextQueryState);
   }
 
   async function clearRangeFilterSearch() {
-    applyRangeFilterState(DEFAULT_RANGE_FILTER_STATE);
+    const nextQueryState = buildTaskQueryState(currentTaskQueryState(), DEFAULT_RANGE_FILTER_STATE);
+    applyTaskQueryState(nextQueryState);
     setRangeFilterOpen(false);
     setTaskPage(1);
-    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, DEFAULT_RANGE_FILTER_STATE);
+    await loadBookTasks(selectedBook?.book_id, 1, selectedBatchId, DEFAULT_RANGE_FILTER_STATE, taskPageSize, nextQueryState);
+  }
+
+  function toggleRunCompare(runId: string) {
+    setCompareRunIds((current) => {
+      if (current.includes(runId)) {
+        return current.filter((id) => id !== runId);
+      }
+      return [...current, runId].slice(-2);
+    });
   }
 
   async function showRunningTasks() {
     if (!selectedBook || selectedBatchId === 'all') return;
-    setStatusFilter('running');
-    applyRangeFilterState(DEFAULT_RANGE_FILTER_STATE);
-    setTaskQuery('');
-    setHasImage('all');
-    setValueStatus('all');
+    const nextQueryState = {
+      ...DEFAULT_TASK_QUERY_STATE,
+      statusFilter: 'running' as StatusFilter
+    };
+    applyTaskQueryState(nextQueryState);
     setTaskPage(1);
     await loadBookTasks(selectedBook.book_id, 1, selectedBatchId, {
       ...DEFAULT_RANGE_FILTER_STATE,
@@ -1849,7 +1981,7 @@ function BooksManagementPage({
       taskQuery: '',
       hasImage: 'all',
       valueStatus: 'all'
-    });
+    }, taskPageSize, nextQueryState);
   }
 
   async function uploadWorkbook(file: File) {
@@ -1879,12 +2011,12 @@ function BooksManagementPage({
       const bookIds = Array.from(new Set(nextBatch.tasks.map((task) => task.input.book_id).filter((value) => Number.isFinite(value)))).sort((a, b) => a - b);
       const nextPageSize = taskListPageSize(nextBatch.tasks.filter((task) => task.input.book_id === bookIds[0]).length);
       setRecentImportedBookIds(bookIds);
-      switchTaskScope(bookIds[0], nextBatch.id);
+      const nextQueryState = switchTaskScope(bookIds[0], nextBatch.id);
       setSelectedBatchId(nextBatch.id);
       setTaskPageSize(nextPageSize);
       await loadBooks(bookIds[0]);
       await loadBookBatches(bookIds[0], nextBatch.id);
-      await loadBookTasks(bookIds[0], 1, nextBatch.id, {}, nextPageSize);
+      await loadBookTasks(bookIds[0], 1, nextBatch.id, {}, nextPageSize, nextQueryState);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : '上传并编译失败');
     } finally {
@@ -1909,18 +2041,19 @@ function BooksManagementPage({
     setContinuing(true);
     setError(null);
     try {
-      const params = taskQueryParams(1, taskPageSize, selectedBatchId);
+      const params = createTaskQueryParams(appliedTaskQueryState, 1, taskPageSize, selectedBatchId);
       params.delete('page');
       params.delete('pageSize');
       const query = params.toString();
       const batch = await fetch(`/api/books/${selectedBook.book_id}/continue${query ? `?${query}` : ''}`, { method: 'POST' }).then((response) => readJson<Batch>(response));
       const nextPageSize = taskListPageSize(batch.tasks.filter((task) => task.input.book_id === selectedBook.book_id).length);
+      const nextQueryState = taskQueryStateForScope(selectedBook.book_id, batch.id);
       setSelectedBatchId(batch.id);
       setTaskPageSize(nextPageSize);
       setTaskPage(1);
       await loadBooks(selectedBook.book_id);
       await loadBookBatches(selectedBook.book_id, batch.id);
-      await loadBookTasks(selectedBook.book_id, 1, batch.id, {}, nextPageSize);
+      await loadBookTasks(selectedBook.book_id, 1, batch.id, {}, nextPageSize, nextQueryState);
     } catch (continueError) {
       setError(continueError instanceof Error ? continueError.message : '继续执行失败');
     } finally {
@@ -1935,15 +2068,20 @@ function BooksManagementPage({
       const suffix = action === 'delete' ? '' : `/${action}`;
       const result = await fetch(`/api/tasks/${task.id}${suffix}`, { method }).then((response) => readJson<Batch | BatchTask>(response));
       let nextTaskListId = selectedBatchId;
+      let nextQueryState = taskQueryStateForScope(selectedBook?.book_id, selectedBatchId);
       if ('tasks' in result) {
         nextTaskListId = result.id;
-        if (result.id !== selectedBatchId) switchTaskScope(selectedBook?.book_id, result.id);
+        if (result.id !== selectedBatchId) {
+          nextQueryState = switchTaskScope(selectedBook?.book_id, result.id);
+        } else {
+          nextQueryState = taskQueryStateForScope(selectedBook?.book_id, result.id);
+        }
         setSelectedBatchId(result.id);
       }
       const nextPageSize = 'tasks' in result ? taskListPageSize(result.tasks.filter((task) => task.input.book_id === selectedBook?.book_id).length) : taskPageSize;
       await loadBooks(selectedBook?.book_id);
       await loadBookBatches(selectedBook?.book_id, nextTaskListId);
-      await loadBookTasks(selectedBook?.book_id, taskPage, nextTaskListId, {}, nextPageSize);
+      await loadBookTasks(selectedBook?.book_id, taskPage, nextTaskListId, {}, nextPageSize, nextQueryState);
       await loadRuns(task.id);
     } catch (taskError) {
       setError(taskError instanceof Error ? taskError.message : '任务操作失败');
@@ -1971,15 +2109,22 @@ function BooksManagementPage({
     try {
       await fetch(`/api/batches/${batch.id}`, { method: 'DELETE' }).then((response) => readJson<{ ok: boolean }>(response));
       const nextTaskListId = selectedBatchId === batch.id ? 'all' : selectedBatchId;
+      const nextQueryState = selectedBatchId === batch.id ? switchTaskScope(selectedBook?.book_id, 'all') : taskQueryStateForScope(selectedBook?.book_id, nextTaskListId);
       if (selectedBatchId === batch.id) {
-        switchTaskScope(selectedBook?.book_id, 'all');
         setSelectedBatchId('all');
         setTaskPageSize(taskListPageSize());
       }
       setSelectedTaskId(null);
       await loadBooks(selectedBook?.book_id);
       await loadBookBatches(selectedBook?.book_id, nextTaskListId);
-      await loadBookTasks(selectedBook?.book_id, taskPage, nextTaskListId, {}, nextTaskListId === 'all' ? taskListPageSize() : taskPageSize);
+      await loadBookTasks(
+        selectedBook?.book_id,
+        taskPage,
+        nextTaskListId,
+        {},
+        nextTaskListId === 'all' ? taskListPageSize() : taskPageSize,
+        nextQueryState
+      );
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除任务清单失败');
     } finally {
@@ -2082,13 +2227,13 @@ function BooksManagementPage({
                 className={selectedBook?.book_id === book.book_id ? 'active' : ''}
                 onClick={() => {
                   const nextPageSize = taskListPageSize(book.task_count);
-                  if (selectedBook?.book_id !== book.book_id) switchTaskScope(book.book_id, 'all');
+                  const nextQueryState = selectedBook?.book_id !== book.book_id ? switchTaskScope(book.book_id, 'all') : taskQueryStateForScope(book.book_id, 'all');
                   setSelectedBookId(book.book_id);
                   setSelectedBatchId('all');
                   setTaskPageSize(nextPageSize);
                   setSelectedTaskId(null);
                   setTaskPage(1);
-                  void loadBookTasks(book.book_id, 1, 'all', {}, nextPageSize);
+                  void loadBookTasks(book.book_id, 1, 'all', {}, nextPageSize, nextQueryState);
                 }}
               >
                 <strong>{book.name || `书籍 ${book.book_id}`}</strong>
@@ -2141,12 +2286,13 @@ function BooksManagementPage({
             <button
               className={selectedBatchId === 'all' ? 'active' : ''}
               onClick={() => {
-                if (selectedBatchId !== 'all') switchTaskScope(selectedBook?.book_id, 'all');
+                const nextQueryState =
+                  selectedBatchId !== 'all' ? switchTaskScope(selectedBook?.book_id, 'all') : taskQueryStateForScope(selectedBook?.book_id, 'all');
                 const nextPageSize = pageSizeForScope('all');
                 setSelectedBatchId('all');
                 setTaskPageSize(nextPageSize);
                 setTaskPage(1);
-                void loadBookTasks(selectedBook?.book_id, 1, 'all', {}, nextPageSize);
+                void loadBookTasks(selectedBook?.book_id, 1, 'all', {}, nextPageSize, nextQueryState);
               }}
             >
               全部任务
@@ -2179,11 +2325,14 @@ function BooksManagementPage({
                     className="batch-chip-main"
                     onClick={() => {
                       const nextPageSize = taskListPageSize(batch.task_count);
-                      if (selectedBatchId !== batch.id) switchTaskScope(selectedBook?.book_id, batch.id);
+                      const nextQueryState =
+                        selectedBatchId !== batch.id
+                          ? switchTaskScope(selectedBook?.book_id, batch.id)
+                          : taskQueryStateForScope(selectedBook?.book_id, batch.id);
                       setSelectedBatchId(batch.id);
                       setTaskPageSize(nextPageSize);
                       setTaskPage(1);
-                      void loadBookTasks(selectedBook?.book_id, 1, batch.id, {}, nextPageSize);
+                      void loadBookTasks(selectedBook?.book_id, 1, batch.id, {}, nextPageSize, nextQueryState);
                     }}
                   >
                     {normalizeDisplayFileName(batch.file_name)}
@@ -2269,14 +2418,7 @@ function BooksManagementPage({
                 {isRangeFilterOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
               {isRangeFilterOpen && (
-                <div
-                  className="range-filter-popover"
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter') return;
-                    event.preventDefault();
-                    void applyRangeFilterSearch();
-                  }}
-                >
+                <div className="range-filter-popover">
                   <label>
                     筛选维度
                     <select
@@ -2395,7 +2537,7 @@ function BooksManagementPage({
                     ? '请先选择一个上传文档任务清单后再执行生图'
                     : selectedBatchIsRunning
                       ? '当前任务清单正在执行中'
-                      : undefined
+                      : `按当前任务列表范围执行：${continueScopeText}。改了筛选后请先点“查询”，已成功任务会重新生成并保留历史记录`
                 }
               >
                 {isContinuing ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
@@ -2601,14 +2743,54 @@ function BooksManagementPage({
             </div>
             {isRunLogOpen && (
               <div className="run-list">
-                {runs.map((run) => (
-                  <div className={`run-item ${run.status}`} key={run.id}>
-                    <div>
-                      <strong>第 {run.attempt_no} 次 · {statusLabel[run.status]}</strong>
+                {compareRuns.length === 2 && (
+                  <div className="run-compare-panel">
+                    {compareRuns.map((run) => (
+                      <section className="run-compare-card" key={run.id}>
+                        <header>
+                          <strong>{runTitle(run)}</strong>
+                          <small>{new Date(run.created_at).toLocaleString()}</small>
+                        </header>
+                        {run.result_files[0] ? (
+                          <button className="run-thumb-button" onClick={() => setLightboxFile(run.result_files[0])}>
+                            <img src={absolutePreviewUrl(run.result_files[0].previewUrl)} alt={run.result_files[0].name} />
+                          </button>
+                        ) : (
+                          <div className="run-thumb-empty">暂无图片</div>
+                        )}
+                        <div className="run-compare-meta">
+                          <span>is_valid：{runIsValid(run)}</span>
+                          <span>{run.elapsed_seconds ? `耗时 ${run.elapsed_seconds}s` : '耗时 -'}</span>
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                )}
+                {runs.map((run, index) => (
+                  <div className={`run-item ${run.status} ${compareRunIds.includes(run.id) ? 'selected' : ''}`} key={run.id}>
+                    <div className="run-item-head">
+                      <strong>记录 {runs.length - index} · 第 {run.attempt_no} 次尝试 · {statusLabel[run.status]}</strong>
                       <time>{new Date(run.created_at).toLocaleString()}</time>
                     </div>
-                    <span>{run.elapsed_seconds ? `${run.elapsed_seconds}s` : '-'}</span>
+                    <div className="run-item-meta">
+                      <span>{run.elapsed_seconds ? `${run.elapsed_seconds}s` : '-'}</span>
+                      <span>is_valid：{runIsValid(run)}</span>
+                    </div>
+                    <p className="run-item-title">{runTitle(run)}</p>
+                    {runDescription(run) && <p>{runDescription(run)}</p>}
+                    {run.result_files[0] ? (
+                      <button className="run-thumb-button" onClick={() => setLightboxFile(run.result_files[0])}>
+                        <img src={absolutePreviewUrl(run.result_files[0].previewUrl)} alt={run.result_files[0].name} />
+                      </button>
+                    ) : (
+                      <div className="run-thumb-empty">暂无图片</div>
+                    )}
                     {run.error && <p>{run.error}</p>}
+                    <div className="run-item-actions">
+                      <button className="secondary-action" onClick={() => toggleRunCompare(run.id)}>
+                        {compareRunIds.includes(run.id) ? '取消对比' : '加入对比'}
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {runs.length === 0 && <p className="muted">还没有执行记录。</p>}
@@ -2679,7 +2861,8 @@ function QualityPromptPage() {
     [experiment, selectedRecordId]
   );
   const qualityTotalPages = Math.max(1, Math.ceil((experiment?.records.length ?? 0) / qualityPageSize));
-  const qualityPageStart = experiment ? (qualityPage - 1) * qualityPageSize : 0;
+  const currentQualityPage = Math.min(Math.max(1, qualityPage), qualityTotalPages);
+  const qualityPageStart = experiment ? (currentQualityPage - 1) * qualityPageSize : 0;
   const qualityPageEnd = experiment ? Math.min(qualityPageStart + qualityPageSize, experiment.records.length) : 0;
   const paginatedQualityRecords = useMemo(
     () => experiment?.records.slice(qualityPageStart, qualityPageEnd) ?? [],
@@ -2751,10 +2934,6 @@ function QualityPromptPage() {
     };
     return () => source.close();
   }, [experiment?.id]);
-
-  useEffect(() => {
-    setQualityPage((current) => Math.min(Math.max(1, current), qualityTotalPages));
-  }, [qualityTotalPages]);
 
   useEffect(() => {
     return () => {
@@ -3226,7 +3405,7 @@ function QualityPromptPage() {
               <div className="task-pagination quality-pagination">
                 <div className="pagination-summary">
                   {experiment.records.length > 0
-                    ? `第 ${qualityPageStart + 1}-${qualityPageEnd} / ${experiment.records.length} 条 · 第 ${qualityPage} / ${qualityTotalPages} 页`
+                    ? `第 ${qualityPageStart + 1}-${qualityPageEnd} / ${experiment.records.length} 条 · 第 ${currentQualityPage} / ${qualityTotalPages} 页`
                     : '0 条'}
                 </div>
                 <label>
@@ -3245,15 +3424,15 @@ function QualityPromptPage() {
                 <div className="pagination-actions">
                   <button
                     className="secondary-action"
-                    disabled={qualityPage <= 1}
-                    onClick={() => selectQualityPage(qualityPage - 1)}
+                    disabled={currentQualityPage <= 1}
+                    onClick={() => selectQualityPage(currentQualityPage - 1)}
                   >
                     上一页
                   </button>
                   <button
                     className="secondary-action"
-                    disabled={qualityPage >= qualityTotalPages}
-                    onClick={() => selectQualityPage(qualityPage + 1)}
+                    disabled={currentQualityPage >= qualityTotalPages}
+                    onClick={() => selectQualityPage(currentQualityPage + 1)}
                   >
                     下一页
                   </button>

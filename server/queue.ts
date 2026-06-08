@@ -104,6 +104,21 @@ function addEvent(batch: Batch, type: BatchLogEvent['type'], message: string, ta
   batch.events = batch.events.slice(0, 120);
 }
 
+function continueFilterSummary(filters: BookTaskFilters = {}) {
+  const summary: string[] = [];
+  if (filters.status && filters.status !== 'all') summary.push(`状态=${filters.status}`);
+  if (filters.hasImage && filters.hasImage !== 'all') summary.push(`图片=${filters.hasImage}`);
+  if (filters.valueStatus && filters.valueStatus !== 'all') summary.push(`价值=${filters.valueStatus}`);
+  if (filters.chapterSortFrom !== undefined || filters.chapterSortTo !== undefined) {
+    summary.push(`章节=${filters.chapterSortFrom ?? '-'}-${filters.chapterSortTo ?? '-'}`);
+  }
+  if (filters.rowNoFrom !== undefined || filters.rowNoTo !== undefined) {
+    summary.push(`行号=${filters.rowNoFrom ?? '-'}-${filters.rowNoTo ?? '-'}`);
+  }
+  if (filters.q?.trim()) summary.push(`关键词=${filters.q.trim()}`);
+  return summary.length > 0 ? summary.join('，') : '全部任务';
+}
+
 export function getBatch(batchId: string) {
   return batches.get(batchId);
 }
@@ -694,14 +709,18 @@ export function continueBook(bookId: number, filters: BookTaskFilters = {}) {
   }
   const runnableTasks = listBookTasks(bookId, { ...filters, batchId: taskListId })
     .filter((task) => task.batch_id === taskListId)
-    .filter((task) => (task.status === 'queued' || task.status === 'paused' || task.status === 'failed') && !isValidationFailed(task))
+    .filter(
+      (task) =>
+        (task.status === 'queued' || task.status === 'paused' || task.status === 'failed' || task.status === 'succeeded') &&
+        !isValidationFailed(task)
+    )
     .filter((task) => task.batch_id);
   if (runnableTasks.length === 0) throw new Error('当前任务列表没有可执行的任务');
   const runnableIds = new Set(runnableTasks.map((task) => task.id));
   let queuedCount = 0;
   for (const task of batch.tasks) {
     if (!runnableIds.has(task.id)) continue;
-    if (task.status === 'failed' || task.status === 'paused') resetTaskForRetry(task);
+    if (task.status === 'failed' || task.status === 'paused' || task.status === 'succeeded') resetTaskForRetry(task);
     if (task.status === 'queued') {
       task.progress_label = task.progress_label ?? '等待执行';
       queuedCount += 1;
@@ -709,7 +728,7 @@ export function continueBook(bookId: number, filters: BookTaskFilters = {}) {
   }
   if (queuedCount === 0) throw new Error('当前任务列表没有可执行的任务');
   batch.finishedAt = undefined;
-  addEvent(batch, 'info', `开始执行当前任务清单 ${queuedCount} 个任务`);
+  addEvent(batch, 'info', `开始执行当前任务清单 ${queuedCount} 个任务（范围：${continueFilterSummary(filters)}）`);
   emit(batch);
   void runBatchLoop(batch, runnableIds);
   return batch;

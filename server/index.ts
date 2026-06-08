@@ -358,7 +358,9 @@ app.get('/api/books/:bookId/tasks', (req, res) => {
   }
   const allTasks = listTasksForBook(bookId, filters);
   const runnableTotal = allTasks.filter(
-    (task) => (task.status === 'queued' || task.status === 'paused' || task.status === 'failed') && !task.error?.startsWith('字段校验失败')
+    (task) =>
+      (task.status === 'queued' || task.status === 'paused' || task.status === 'failed' || task.status === 'succeeded') &&
+      !task.error?.startsWith('字段校验失败')
   ).length;
   const total = allTasks.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSizeRaw));
