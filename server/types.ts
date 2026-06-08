@@ -109,6 +109,7 @@ export interface TaskRunRecord {
   elapsed_seconds?: number;
   workflow_run_id?: string;
   dify_task_id?: string;
+  is_valid?: unknown;
   result_files: ResultFile[];
   result_text?: string;
   raw_outputs?: unknown;

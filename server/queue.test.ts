@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { getFile } from './fileStore.js';
 import type { ParsedWorkbook } from './types.js';
 import {
   __setWorkflowControlsForTest,
@@ -21,7 +22,7 @@ import {
   startBatch,
   startSelectedTasks
 } from './queue.js';
-import { closeStoreForTest, saveBatch } from './store.js';
+import { closeStoreForTest, getDb, saveBatch } from './store.js';
 
 const workbook: ParsedWorkbook = {
   id: 'workbook-1',
@@ -247,6 +248,60 @@ describe('queue', () => {
     expect(runs[0].status).toBe('succeeded');
   });
 
+  it('registers history-only run files when task runs are listed', () => {
+    const batch = makeBatch();
+    const task = batch.tasks[0];
+    const runOnlyFileId = `run-only-file-${Date.now()}`;
+    const runOnlyFile = {
+      id: runOnlyFileId,
+      taskId: task.id,
+      name: 'history-only.png',
+      mimeType: 'image/png',
+      previewUrl: `/api/files/${runOnlyFileId}`,
+      localPath: path.join(os.tmpdir(), `history-only-${runOnlyFileId}.png`),
+      sourceKind: 'local' as const
+    };
+
+    expect(getFile(runOnlyFileId)).toBeUndefined();
+
+    getDb()
+      .prepare(
+        `
+        INSERT INTO task_runs (
+          id, task_id, attempt_no, status, started_at, finished_at, elapsed_seconds,
+          workflow_run_id, dify_task_id, result_files_json, result_text, raw_outputs_json,
+          error, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        `run-${runOnlyFileId}`,
+        task.id,
+        1,
+        'succeeded',
+        null,
+        null,
+        null,
+        'workflow-history-only',
+        'dify-history-only',
+        JSON.stringify([runOnlyFile]),
+        null,
+        null,
+        null,
+        new Date().toISOString()
+      );
+
+    const runs = getTaskRuns(task.id);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0].result_files[0]?.id).toBe(runOnlyFileId);
+    expect(getFile(runOnlyFileId)).toMatchObject({
+      id: runOnlyFileId,
+      previewUrl: `/api/files/${runOnlyFileId}`
+    });
+  });
+
   it('does not create a temporary task list for manual tasks', () => {
     const task = addManualBookTask({
       book_id: 99,
@@ -299,6 +354,35 @@ describe('queue', () => {
     expect(batch.tasks.map((task) => task.id)).toEqual([second.tasks[0].id]);
     expect(ranRows).toEqual([9]);
     expect(listTasksForBook(1, { batchId: first.id })[0].status).toBe('queued');
+  });
+
+  it('supports rerunning succeeded tasks through continueBook filters', async () => {
+    let runCount = 0;
+    __setWorkflowControlsForTest(async (task) => {
+      runCount += 1;
+      return {
+        workflowRunId: `run-${runCount}`,
+        taskId: `task-${runCount}`,
+        outputs: { title: `标题 ${task.row_no} - ${runCount}` },
+        raw: {}
+      };
+    });
+
+    const batch = makeBatch();
+
+    continueBook(1, { batchId: batch.id });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(batch.tasks[0].status).toBe('succeeded');
+    expect(getTaskRuns(batch.tasks[0].id)).toHaveLength(1);
+
+    continueBook(1, { batchId: batch.id, status: 'succeeded' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const runs = getTaskRuns(batch.tasks[0].id);
+    expect(batch.tasks[0].status).toBe('succeeded');
+    expect(runs).toHaveLength(2);
+    expect(runs[0].workflow_run_id).toBe('run-2');
+    expect(runs[1].workflow_run_id).toBe('run-1');
   });
 
   it('requires an uploaded document task list before continuing a book', () => {

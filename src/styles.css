@@ -1746,6 +1746,37 @@ select {
   gap: 8px;
 }
 
+.run-compare-panel {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.run-compare-card {
+  background: #ffffff;
+  border: 1px solid #dce2ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.run-compare-card header {
+  display: grid;
+  gap: 2px;
+}
+
+.run-compare-card strong {
+  color: #263247;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.run-compare-card small {
+  color: #657084;
+  font-size: 11px;
+}
+
 .run-item {
   background: #f7f9fc;
   border: 1px solid #e3e7ef;
@@ -1768,11 +1799,25 @@ select {
   border-left-color: #b77800;
 }
 
-.run-item > div {
+.run-item.selected {
+  border-color: #2f74ff;
+  box-shadow: 0 0 0 1px rgba(47, 116, 255, 0.2);
+}
+
+.run-item-head {
   align-items: center;
   display: flex;
   gap: 8px;
   justify-content: space-between;
+}
+
+.run-item-meta {
+  align-items: center;
+  color: #263247;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 10px;
 }
 
 .run-item strong,
@@ -1782,11 +1827,62 @@ select {
   font-weight: 800;
 }
 
+.run-item-title {
+  color: #1f2a3e;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+}
+
 .run-item time,
 .run-item p {
   color: #657084;
   font-size: 12px;
   margin: 0;
+}
+
+.run-thumb-button {
+  background: #eef3fa;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  cursor: pointer;
+  display: block;
+  height: 120px;
+  overflow: hidden;
+  padding: 0;
+  width: 100%;
+}
+
+.run-thumb-button img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.run-thumb-empty {
+  align-items: center;
+  background: #eef3fa;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  color: #73809a;
+  display: flex;
+  font-size: 12px;
+  height: 96px;
+  justify-content: center;
+}
+
+.run-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.run-compare-meta {
+  color: #34425c;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 12px;
 }
 
 .select-column input:disabled {
@@ -2825,6 +2921,10 @@ select {
 
   .book-filter-panel,
   .book-main-grid .books-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .run-compare-panel {
     grid-template-columns: 1fr;
   }
 

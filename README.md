@@ -1,15 +1,15 @@
 # Dify Excel 批量工作流网站
 
-> 项目唯一真实信源。需求、接口、数据模型、运行方式和当前基线以本文档为准。
+> 功能基线、接口契约、数据模型和运行方式以本文档为准；项目状态、任务看板、决策、线程索引、Git 边界和风险清单见 `docs/project-control.md`。
 
 本项目是一个本地单机 Web 工具：上传 Excel/CSV，将每行映射为 Dify 工作流任务，按队列串行执行，实时展示进度、日志、图片和输出结果，并支持导出到飞书多维表格。
 
 ## 当前基线
 
-- 日期：2026-05-26
-- 当前分支：`codex/book-control`
-- 已合并主线基线：`ee9d756 Merge pull request #3 from fuer121/codex/book-select`
-- 当前分支目标：书籍管理与任务记录持久化，支持按书籍聚合、查询、新增任务、查看历史执行记录和继续未完成任务。
+- 日期：2026-06-07
+- 当前分支：`codex/picture-control`
+- 当前已提交基线：`462ef1b Merge pull request #5 from fuer121/codex/redesign02`
+- 当前已提交目标：批量生图、书籍管理与质量判断的主线能力已经合并；进行中的优化与治理状态见 `docs/project-control.md`。
 - 当前持久化策略：后端 SQLite 保存书籍、任务、批次和执行记录；默认路径 `data/dify-batch.sqlite`。
 - 当前部署边界：只面向本机运行，监听 `127.0.0.1`，不做公网账号体系。
 
@@ -31,7 +31,7 @@
 
 ## 当前分支增量
 
-`codex/book-control` 分支新增书籍与记录管理：
+以下能力来自已合并分支增量：
 
 - 新增顶层“书籍管理”页面，与“批量生图”“质量判断”同级。
 - SQLite 表包含 `books`、`tasks`、`task_runs`、`batches`、`batch_tasks` 和 `batch_events`。
