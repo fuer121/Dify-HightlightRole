@@ -23,6 +23,14 @@ function extensionForMime(mimeType: string) {
   return 'png';
 }
 
+function sniffImageMime(buffer: Buffer, fallback: string) {
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+  if (buffer.subarray(0, 3).toString('ascii') === 'GIF') return 'image/gif';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  return fallback;
+}
+
 function guessMimeFromName(name: string) {
   const lower = name.toLowerCase();
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
@@ -102,12 +110,12 @@ export function registerRemoteFile(taskId: string, remoteUrl: string, name?: str
 export async function registerBase64File(taskId: string, value: string, name?: string) {
   const id = nanoid();
   const match = value.match(/^data:([^;]+);base64,(.+)$/);
-  const mimeType = match?.[1] ?? 'image/png';
   const base64 = match?.[2] ?? value;
+  const buffer = Buffer.from(base64, 'base64');
+  const mimeType = sniffImageMime(buffer, match?.[1] ?? 'image/png');
   const fileName = name || `dify-result-${id}.${extensionForMime(mimeType)}`;
   await mkdir(TMP_DIR, { recursive: true });
   const localPath = path.join(TMP_DIR, fileName);
-  const buffer = Buffer.from(base64, 'base64');
   await writeFile(localPath, buffer);
   const file: ResultFile = {
     id,
@@ -145,13 +153,15 @@ export async function ensureLocalFile(file: ResultFile) {
   for (const url of remoteUrls) {
     try {
       const response = await fetch(url, {
-        headers: authHeadersFor(url)
+        headers: authHeadersFor(url),
+        signal: AbortSignal.timeout(5000)
       });
       if (!response.ok) {
         errors.push(`${response.status} ${url}`);
         continue;
       }
       const buffer = Buffer.from(await response.arrayBuffer());
+      file.mimeType = sniffImageMime(buffer, file.mimeType);
       await writeFile(localPath, buffer);
       file.localPath = localPath;
       file.remoteUrl = url;
@@ -202,7 +212,8 @@ export async function streamFile(id: string) {
   for (const url of remoteUrls) {
     try {
       const response = await fetch(url, {
-        headers: authHeadersFor(url)
+        headers: authHeadersFor(url),
+        signal: AbortSignal.timeout(5000)
       });
       if (!response.ok || !response.body) {
         errors.push(`${response.status} ${url}`);

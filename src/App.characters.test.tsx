@@ -25,6 +25,12 @@ function changeInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function changeTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+  valueSetter?.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function changeCheckboxValue(input: HTMLInputElement, checked: boolean) {
   if (input.checked !== checked) input.click();
 }
@@ -132,6 +138,7 @@ describe('App characters page routing', () => {
 
   it('filters character task rows by included role', async () => {
     let startRequestBody: string | null = null;
+    let promptPatchBody: string | null = null;
     characterJobs = [
       {
         id: 'job-filter',
@@ -163,6 +170,22 @@ describe('App characters page routing', () => {
           sheetName: '执行结果7',
           mapping: {},
           promptText: 'prompt',
+          status: 'completed',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-jobs/job-filter/prompt')) {
+        promptPatchBody = typeof init?.body === 'string' ? init.body : null;
+        return jsonResponse({
+          id: 'job-filter',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: JSON.parse(promptPatchBody ?? '{}').promptText,
           status: 'completed',
           createdAt: '2026-06-09T00:00:00.000Z',
           updatedAt: '2026-06-09T00:00:00.000Z',
@@ -237,11 +260,18 @@ describe('App characters page routing', () => {
     expect(container.textContent).toContain('云筝');
     expect(container.textContent).not.toContain('容烁出现');
 
+    const promptTextarea = container.querySelector('textarea')!;
+    await act(async () => {
+      changeTextareaValue(promptTextarea, '新版角色设定图重绘 Prompt');
+    });
+    await flushUi();
+
     const startButton = Array.from(container.querySelectorAll('button')).find((item) => item.textContent?.includes('执行提取'))!;
     await act(async () => {
       startButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
+    expect(JSON.parse(promptPatchBody ?? '{}')).toEqual({ promptText: '新版角色设定图重绘 Prompt' });
     expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz'] });
   });
 
@@ -393,5 +423,134 @@ describe('App characters page routing', () => {
     });
 
     expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz'] });
+  });
+
+  it('starts only selected character tasks from the batch selection bar', async () => {
+    let startRequestBody: string | null = null;
+    characterJobs = [
+      {
+        id: 'job-select',
+        file_name: '角色任务.xlsx',
+        sheet_name: '执行结果7',
+        status: 'completed',
+        created_at: '2026-06-09T00:00:00.000Z',
+        updated_at: '2026-06-09T00:00:00.000Z',
+        task_count: 3,
+        queued_count: 3,
+        running_count: 0,
+        succeeded_count: 0,
+        failed_count: 0,
+        paused_count: 0
+      }
+    ];
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/health')) {
+        return jsonResponse({ config: { characterDifyWorkflowName: '角色工作流', hasCharacterDifyApiKey: true } });
+      }
+      if (url.endsWith('/api/character-jobs')) return jsonResponse({ jobs: characterJobs });
+      if (url.endsWith('/api/character-jobs/job-select/start')) {
+        startRequestBody = typeof init?.body === 'string' ? init.body : null;
+        return jsonResponse({
+          id: 'job-select',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: 'prompt',
+          status: 'running',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-jobs/job-select')) {
+        return jsonResponse({
+          id: 'job-select',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: 'prompt',
+          status: 'completed',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [
+            {
+              id: 'task-yz',
+              job_id: 'job-select',
+              row_no: 2,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 1,
+                chapter_name: '第1章',
+                paragraph_content: '云筝出现',
+                paragraph_image_url: 'https://cdn.example.com/a.png',
+                role_name: '云筝'
+              },
+              status: 'queued',
+              attempts: 0,
+              portrait_files: []
+            },
+            {
+              id: 'task-rs',
+              job_id: 'job-select',
+              row_no: 3,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 2,
+                chapter_name: '第2章',
+                paragraph_content: '容烁出现',
+                paragraph_image_url: 'https://cdn.example.com/b.png',
+                role_name: '容烁'
+              },
+              status: 'queued',
+              attempts: 0,
+              portrait_files: []
+            },
+            {
+              id: 'task-xr',
+              job_id: 'job-select',
+              row_no: 4,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 3,
+                chapter_name: '第3章',
+                paragraph_content: '萧燃出现',
+                paragraph_image_url: 'https://cdn.example.com/c.png',
+                role_name: '萧燃'
+              },
+              status: 'queued',
+              attempts: 0,
+              portrait_files: []
+            }
+          ],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-tasks/task-yz/runs')) return jsonResponse({ runs: [] });
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+
+    const row2Checkbox = container.querySelector<HTMLInputElement>('input[aria-label="选择第 2 行"]')!;
+    const row4Checkbox = container.querySelector<HTMLInputElement>('input[aria-label="选择第 4 行"]')!;
+    await act(async () => {
+      changeCheckboxValue(row2Checkbox, true);
+      changeCheckboxValue(row4Checkbox, true);
+    });
+    await flushUi();
+
+    const startSelectedButton = Array.from(container.querySelectorAll('button')).find((item) => item.textContent?.includes('执行已选 2 条'))!;
+    await act(async () => {
+      startSelectedButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz', 'task-xr'] });
   });
 });

@@ -14,6 +14,7 @@ import { __runCharacterWorkflowForTest, __setCharacterWorkflowControlsForTest, a
 const jobs = new Map<string, CharacterJob>();
 const subscribers = new Map<string, Set<(job: CharacterJob) => void>>();
 const activeJobs = new Set<string>();
+const pauseRequests = new Set<string>();
 
 function now() {
   return new Date().toISOString();
@@ -150,6 +151,7 @@ async function runJob(job: CharacterJob, scopedTaskIds?: Set<string>) {
     emit(job);
 
     for (const task of job.tasks) {
+      if (pauseRequests.has(job.id)) break;
       if (scopedTaskIds && !scopedTaskIds.has(task.id)) continue;
       if (task.status !== 'queued' && task.status !== 'running') continue;
       if (processedTasks >= maxTasksPerRun) break;
@@ -251,6 +253,7 @@ export function startCharacterJob(jobId: string, taskIds?: string[]) {
   const job = getCharacterJob(jobId);
   if (!job) throw new Error('角色任务不存在');
   if (!jobs.has(job.id)) jobs.set(job.id, job);
+  pauseRequests.delete(job.id);
   const scopedTaskIds = taskIds ? new Set(taskIds) : undefined;
   if (scopedTaskIds?.size === 0) throw new Error('当前筛选范围没有可执行任务');
   if (scopedTaskIds) {
@@ -280,21 +283,55 @@ export function retryCharacterTask(jobId: string, taskId: string) {
   resetTaskForRetry(task);
   saveCharacterTask(task);
   if (!jobs.has(job.id)) jobs.set(job.id, job);
-  void runJob(job);
+  pauseRequests.delete(job.id);
+  void runJob(job, new Set([task.id]));
   return job;
 }
 
 export function retryCharacterFailed(jobId: string) {
   const job = getCharacterJob(jobId);
   if (!job) throw new Error('角色任务不存在');
+  const retryTaskIds: string[] = [];
   for (const task of job.tasks) {
     if (task.status === 'failed' && !task.error?.startsWith('字段校验失败')) {
       resetTaskForRetry(task);
       saveCharacterTask(task);
+      retryTaskIds.push(task.id);
     }
   }
   if (!jobs.has(job.id)) jobs.set(job.id, job);
-  void runJob(job);
+  pauseRequests.delete(job.id);
+  void runJob(job, new Set(retryTaskIds));
+  return job;
+}
+
+export function updateCharacterJobPrompt(jobId: string, promptText: string) {
+  const job = getCharacterJob(jobId);
+  if (!job) throw new Error('角色任务不存在');
+  const nextPrompt = promptText.trim();
+  if (!nextPrompt) throw new Error('Prompt 不能为空');
+  if (!jobs.has(job.id)) jobs.set(job.id, job);
+  job.promptText = nextPrompt;
+  addEvent(job, 'info', '已更新角色立绘重绘 Prompt，后续执行将使用新版 Prompt');
+  emit(job);
+  return job;
+}
+
+export function pauseCharacterJob(jobId: string) {
+  const job = getCharacterJob(jobId);
+  if (!job) throw new Error('角色任务不存在');
+  if (!jobs.has(job.id)) jobs.set(job.id, job);
+  pauseRequests.add(job.id);
+  for (const task of job.tasks) {
+    if (task.status === 'queued') {
+      task.status = 'paused';
+      task.progress_label = '已暂停';
+      saveCharacterTask(task);
+    }
+  }
+  job.status = 'paused';
+  addEvent(job, 'info', '已暂停角色形象提取任务，当前运行中的任务会在完成后停止继续取下一行');
+  emit(job);
   return job;
 }
 

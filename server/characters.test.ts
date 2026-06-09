@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ParsedWorkbook } from './types.js';
 import {
   __setCharacterWorkflowControlsForTest,
@@ -8,8 +8,10 @@ import {
   getCharacterJob,
   getCharacterTaskRuns,
   listCharacterJobs,
+  pauseCharacterJob,
   retryCharacterTask,
-  startCharacterJob
+  startCharacterJob,
+  updateCharacterJobPrompt
 } from './characters.js';
 import { closeStoreForTest } from './store.js';
 
@@ -48,9 +50,21 @@ const workbook: ParsedWorkbook = {
   ]
 };
 
+async function waitFor(condition: () => boolean) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(condition()).toBe(true);
+}
+
 describe('character jobs', () => {
   beforeEach(() => {
     process.env.BATCH_STORE_PATH = path.join(os.tmpdir(), `dify-character-${Date.now()}-${Math.random()}.sqlite`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), { status: 200, headers: { 'Content-Type': 'image/jpeg' } }))
+    );
   });
 
   afterEach(() => {
@@ -61,6 +75,7 @@ describe('character jobs', () => {
     delete process.env.CHARACTER_DIFY_RETRY_DELAY_MS;
     delete process.env.CHARACTER_DIFY_TASK_DELAY_MS;
     delete process.env.CHARACTER_DIFY_MAX_TASKS_PER_RUN;
+    vi.unstubAllGlobals();
   });
 
   it('creates persisted character jobs from workbook rows', () => {
@@ -110,8 +125,7 @@ describe('character jobs', () => {
     );
 
     startCharacterJob(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterJob(job.id)?.status === 'completed');
 
     const finished = getCharacterJob(job.id);
     expect(finished?.tasks[0]).toMatchObject({
@@ -123,8 +137,7 @@ describe('character jobs', () => {
     expect(getCharacterTaskRuns(finished!.tasks[0].id)).toHaveLength(1);
 
     retryCharacterTask(job.id, finished!.tasks[0].id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterTaskRuns(finished!.tasks[0].id).length === 2);
 
     expect(getCharacterTaskRuns(finished!.tasks[0].id)).toHaveLength(2);
   });
@@ -159,12 +172,134 @@ describe('character jobs', () => {
 
     const targetTaskId = job.tasks[1].id;
     (startCharacterJob as (jobId: string, taskIds?: string[]) => unknown)(job.id, [targetTaskId]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterJob(job.id)?.tasks[1]?.status === 'succeeded');
 
     const scoped = getCharacterJob(job.id)!;
     expect(processedRows).toEqual([3]);
     expect(scoped.tasks.map((task) => task.status)).toEqual(['queued', 'succeeded']);
+  });
+
+  it('uses updated character prompt for subsequent task runs', async () => {
+    let receivedPrompt = '';
+    __setCharacterWorkflowControlsForTest(async (_task, promptText) => {
+      receivedPrompt = promptText;
+      return {
+        workflowRunId: 'prompt-run',
+        taskId: 'prompt-task',
+        outputs: {
+          character_image: 'https://cdn.example.com/prompt.png'
+        },
+        raw: {}
+      };
+    });
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '旧 Prompt'
+    );
+
+    const updated = updateCharacterJobPrompt(job.id, '新版重绘设定图 Prompt');
+    expect(updated.promptText).toBe('新版重绘设定图 Prompt');
+
+    (startCharacterJob as (jobId: string, taskIds?: string[]) => unknown)(job.id, [job.tasks[0].id]);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    expect(receivedPrompt).toBe('新版重绘设定图 Prompt');
+  });
+
+  it('does not drain unrelated queued tasks when retrying one character task', async () => {
+    const processedRows: number[] = [];
+    __setCharacterWorkflowControlsForTest(async (task) => {
+      processedRows.push(task.row_no);
+      return {
+        workflowRunId: `single-retry-run-${task.row_no}`,
+        taskId: `single-retry-task-${task.row_no}`,
+        outputs: {
+          character_image: `https://cdn.example.com/single-retry-${task.row_no}.png`
+        },
+        raw: {}
+      };
+    });
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '默认 prompt'
+    );
+    job.tasks[0].status = 'failed';
+    job.tasks[0].error = '立绘生成失败';
+
+    retryCharacterTask(job.id, job.tasks[0].id);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    expect(processedRows).toEqual([2]);
+    expect(getCharacterJob(job.id)!.tasks.map((task) => task.status)).toEqual(['succeeded', 'queued']);
+  });
+
+  it('pauses the character job without starting the next queued task', async () => {
+    const processedRows: number[] = [];
+    let releaseFirstTask!: () => void;
+    const firstTaskStarted = new Promise<void>((resolveStarted) => {
+      __setCharacterWorkflowControlsForTest(async (task) => {
+        processedRows.push(task.row_no);
+        if (task.row_no === 2) {
+          resolveStarted();
+          await new Promise<void>((resolveRelease) => {
+            releaseFirstTask = resolveRelease;
+          });
+        }
+        return {
+          workflowRunId: `pause-run-${task.row_no}`,
+          taskId: `pause-task-${task.row_no}`,
+          outputs: {
+            character_image: `https://cdn.example.com/pause-${task.row_no}.png`
+          },
+          raw: {}
+        };
+      });
+    });
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '默认 prompt'
+    );
+
+    startCharacterJob(job.id);
+    await firstTaskStarted;
+    pauseCharacterJob(job.id);
+    releaseFirstTask();
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    const paused = getCharacterJob(job.id)!;
+    expect(processedRows).toEqual([2]);
+    expect(paused.status).toBe('paused');
+    expect(paused.tasks.map((task) => task.status)).toEqual(['succeeded', 'paused']);
   });
 
   it('keeps Dify outputs for failed image parsing attempts', async () => {
@@ -193,8 +328,7 @@ describe('character jobs', () => {
     );
 
     startCharacterJob(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterJob(job.id)?.status === 'completed');
 
     const failedTask = getCharacterJob(job.id)!.tasks[0];
     const [run] = getCharacterTaskRuns(failedTask.id);
@@ -247,8 +381,7 @@ describe('character jobs', () => {
     job.tasks[0].status = 'running';
 
     startCharacterJob(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterJob(job.id)?.status === 'completed');
 
     const resumed = getCharacterJob(job.id)!;
     expect(resumed.tasks[0]).toMatchObject({
@@ -289,8 +422,7 @@ describe('character jobs', () => {
     );
 
     startCharacterJob(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterJob(job.id)?.status === 'completed');
 
     expect(calls).toBe(3);
     expect(getCharacterJob(job.id)!.tasks[0]).toMatchObject({
@@ -326,8 +458,7 @@ describe('character jobs', () => {
     );
 
     startCharacterJob(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => getCharacterJob(job.id)?.status === 'paused');
 
     const sampled = getCharacterJob(job.id)!;
     expect(sampled.status).toBe('paused');

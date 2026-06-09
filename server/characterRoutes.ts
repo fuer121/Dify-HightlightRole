@@ -5,10 +5,12 @@ import {
   getCharacterJob,
   getCharacterTaskRuns,
   listCharacterJobs,
+  pauseCharacterJob,
   retryCharacterFailed,
   retryCharacterTask,
   startCharacterJob,
-  subscribeCharacterJob
+  subscribeCharacterJob,
+  updateCharacterJobPrompt
 } from './characters.js';
 
 interface RegisterCharacterRouteOptions {
@@ -60,6 +62,16 @@ export function registerCharacterRoutes(app: express.Express, options: RegisterC
     res.json(job);
   });
 
+  app.patch('/api/character-jobs/:id/prompt', (req, res) => {
+    const { promptText } = req.body as { promptText?: unknown };
+    if (typeof promptText !== 'string' || !promptText.trim()) {
+      res.status(400).json({ error: 'Prompt 不能为空' });
+      return;
+    }
+    const job = updateCharacterJobPrompt(req.params.id, promptText);
+    res.json(job);
+  });
+
   app.post('/api/character-jobs/:id/start', (req, res) => {
     const { taskIds } = req.body as { taskIds?: unknown };
     if (taskIds !== undefined && (!Array.isArray(taskIds) || taskIds.some((taskId) => typeof taskId !== 'string'))) {
@@ -67,6 +79,11 @@ export function registerCharacterRoutes(app: express.Express, options: RegisterC
       return;
     }
     const job = startCharacterJob(req.params.id, taskIds);
+    res.json(job);
+  });
+
+  app.post('/api/character-jobs/:id/pause', (req, res) => {
+    const job = pauseCharacterJob(req.params.id);
     res.json(job);
   });
 

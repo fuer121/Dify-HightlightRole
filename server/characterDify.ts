@@ -1,5 +1,5 @@
 import type { CharacterTask, DifyRunResult, ResultFile } from './types.js';
-import { registerBase64File, registerRemoteFile } from './fileStore.js';
+import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
 
 type CharacterRunWorkflow = typeof runCharacterWorkflow;
 
@@ -224,6 +224,7 @@ export async function applyCharacterDifyResult(task: CharacterTask, result: Dify
   if (files.length === 0) {
     throw new Error('未返回立绘图片');
   }
+  await Promise.all(files.map((file) => ensureLocalFile(file).catch(() => undefined)));
   task.workflow_run_id = result.workflowRunId;
   task.dify_task_id = result.taskId ?? task.dify_task_id;
   task.progress_percent = 100;
