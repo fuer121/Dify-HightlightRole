@@ -5,6 +5,7 @@ import {
   getCharacterJob,
   getCharacterTaskRuns,
   listCharacterJobs,
+  pauseCharacterJob,
   retryCharacterFailed,
   retryCharacterTask,
   startCharacterJob,
@@ -67,6 +68,11 @@ export function registerCharacterRoutes(app: express.Express, options: RegisterC
       return;
     }
     const job = startCharacterJob(req.params.id, taskIds);
+    res.json(job);
+  });
+
+  app.post('/api/character-jobs/:id/pause', (req, res) => {
+    const job = pauseCharacterJob(req.params.id);
     res.json(job);
   });
 

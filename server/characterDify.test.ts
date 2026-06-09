@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterTask } from './types.js';
-import { runCharacterWorkflow } from './characterDify.js';
+import { applyCharacterDifyResult, runCharacterWorkflow } from './characterDify.js';
 
 const task: CharacterTask = {
   id: 'character-task-network',
@@ -24,6 +24,7 @@ describe('character Dify workflow', () => {
     delete process.env.CHARACTER_DIFY_API_BASE;
     delete process.env.CHARACTER_DIFY_API_KEY;
     delete process.env.CHARACTER_DIFY_RESPONSE_MODE;
+    vi.unstubAllGlobals();
   });
 
   it('includes network failure details when Dify fetch fails', async () => {
@@ -32,5 +33,39 @@ describe('character Dify workflow', () => {
     process.env.CHARACTER_DIFY_RESPONSE_MODE = 'blocking';
 
     await expect(runCharacterWorkflow(task, 'prompt', 'job-1')).rejects.toThrow(/角色形象提取请求失败：fetch failed.*ECONNREFUSED/);
+  });
+
+  it('caches returned portrait files locally before the signed URL can expire', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { 'Content-Type': 'image/png' } }))
+    );
+    const resultTask: CharacterTask = {
+      ...task,
+      id: `character-cache-${Date.now()}`,
+      portrait_files: []
+    };
+
+    await applyCharacterDifyResult(resultTask, {
+      workflowRunId: 'workflow-cache',
+      taskId: 'dify-cache',
+      outputs: {
+        character_name: '云筝',
+        result: [
+          {
+            url: 'https://dify.example.com/files/tools/portrait.png?sign=temporary',
+            filename: 'portrait.png',
+            mime_type: 'image/png'
+          }
+        ]
+      },
+      raw: {}
+    });
+
+    const portraitFile = resultTask.portrait_files[0];
+    expect(portraitFile).toMatchObject({
+      localPath: expect.stringContaining(portraitFile.id),
+      size: 4
+    });
   });
 });

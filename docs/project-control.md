@@ -13,10 +13,10 @@
 
 ## 当前状态
 
-- Git 基线：`e8d8ca6 Merge pull request #8 from fuer121/codex/bug-fix`
-- 当前分支：`codex/add-newtab`
-- 工作区状态：准备提交 `codex/add-newtab`
-- 已验证项：`npm test` 通过，`npm run build` 通过，`npm run lint` 通过，角色页浏览器核验通过
+- Git 基线：`de0ad9c Merge pull request #9 from fuer121/codex/add-newtab`
+- 当前分支：`codex/Prompt-upgrade`
+- 工作区状态：角色单条执行、批量选择执行、整体暂停与立绘预览缓存修复已完成回归验证，待提交决策
+- 已验证项：`npm test` 通过，`npm run build` 通过，`npm run lint` 通过，稳定访问地址 `http://172.16.79.76:5173/?page=characters` 返回 200
 - 当前未提交优化主题：
   - 继续执行支持按筛选范围重跑已成功任务，并把真实执行 scope 写入批次日志
   - 书籍任务历史新增运行记录图片预览与双记录对比
@@ -26,6 +26,8 @@
   - 角色执行模块左移，并把执行范围绑定到当前筛选命中列表
   - 角色排除筛选改为候选下拉多选
   - 角色排除下拉支持候选搜索且保留多选状态
+  - 角色任务支持单条发起、勾选批量发起、整体暂停
+  - 角色立绘生成结果缓存到本地，避免 Dify 临时图片 URL 过期后预览不可读
 
 ## 本轮目标
 
@@ -54,6 +56,8 @@
 | IMPL-CHAR-04 | 角色执行模块左移并绑定筛选范围执行 | 已验证 | 实现型 Agent | 用户浏览器批注、`/api/character-jobs/:id/start`、当前筛选列表 | `src/CharacterExtractionPage.tsx`、`server/characters.ts`、`server/characterRoutes.ts`、相关测试 | 执行模块位于「上传与映射」下方；前端向 `/start` 发送当前筛选命中的 `taskIds`；后端只执行这些任务；`npm test && npm run build && npm run lint` 通过 | 是 | 与角色功能同提交 |
 | IMPL-CHAR-05 | 排除角色改为候选下拉多选 | 已验证 | 实现型 Agent | 用户浏览器批注、当前角色任务列表 | `src/CharacterExtractionPage.tsx`、`src/styles.css`、`src/App.characters.test.tsx` | 排除角色候选从列表角色字段拆分生成；支持多选；多选后列表与 `/start` 执行范围同步排除对应任务；`npm test && npm run build && npm run lint` 通过 | 是 | 与角色功能同提交 |
 | IMPL-CHAR-06 | 排除角色下拉支持输入搜索并保留已选项 | 已验证 | 实现型 Agent | 用户浏览器批注、角色候选多选下拉 | `src/CharacterExtractionPage.tsx`、`src/styles.css`、`src/App.characters.test.tsx` | 输入搜索只过滤候选展示；多次输入后已选排除角色保留；列表与 `/start` 执行范围继续同步；`npm test && npm run build && npm run lint` 通过 | 是 | 与角色功能同提交 |
+| IMPL-CHAR-07 | 支持角色任务单条执行、批量选择执行与整体暂停 | 已验证 | 实现型 Agent | 当前角色任务列表、`/api/character-jobs/:id/start`、运行队列状态 | `server/characters.ts`、`server/characterRoutes.ts`、`src/CharacterExtractionPage.tsx`、相关测试 | 单条详情可只发起该行；勾选多行后 `/start` 只提交已选 `taskIds`；整体暂停会把 queued 任务置为 paused，当前 running 行完成后不再取下一行；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| IMPL-CHAR-08 | 修复角色立绘生成成功但预览图片不可读 | 已验证 | 排查型 Agent -> 实现型 Agent | 真实任务 `wRMQnhciToy_-bP5D7GXl`、`portrait_files_json`、`/api/files/:id` | `server/characterDify.ts`、`server/fileStore.ts`、`server/characterDify.test.ts`、`server/characters.test.ts`、历史数据修复 | 新生成立绘在结果标准化时尽量落本地缓存；Dify 返回错误 MIME 时按图片字节识别真实类型；历史成功行可从 `markdown_output` base64 回填本地文件；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 
 ## 线程索引
 
@@ -76,6 +80,8 @@
 | IMPL-CHAR-SCOPED-START | 角色执行按钮绑定筛选范围 | 实现线程 | 实现型 Agent | 当前筛选任务列表、角色 start API | 前端/后端执行范围一致并有测试覆盖 | 已完成 |
 | IMPL-CHAR-EXCLUDE-MULTISELECT | 排除角色候选多选 | 实现线程 | 实现型 Agent | 当前任务列表角色字段、筛选/执行范围逻辑 | 排除角色候选下拉多选可用，且执行范围同步 | 已完成 |
 | IMPL-CHAR-EXCLUDE-SEARCH | 排除角色候选搜索 | 实现线程 | 实现型 Agent | 角色候选多选下拉、`filteredTasks` | 搜索候选不清空已选项，执行范围同步 | 已完成 |
+| IMPL-CHAR-TASK-CONTROL | 角色任务单条/批量/暂停控制 | 实现线程 | 实现型 Agent | 当前角色任务列表、`taskIds` 执行范围、角色队列运行状态 | 三类控制入口可用且不会误跑未选择队列 | 已完成 |
+| BUG-CHAR-FILE-CACHE | 排查角色立绘预览图片不可读 | 排查线程 | 排查型 Agent | 真实成功行、`portrait_files_json`、Dify file URL、`/api/files/:id` | 区分生成失败、临时 URL 过期、MIME 错误或本地缓存缺失，并完成最小修复 | 已完成 |
 
 ## 决策记录
 
@@ -119,15 +125,20 @@
 15. 角色执行模块已从中栏任务 toolbar 移到左栏「上传与映射」下方；中栏只保留筛选和列表，降低执行按钮与列表范围不一致的误解风险。
 16. 排除角色筛选改为候选下拉多选；候选来自当前任务列表 `role_name`，并兼容 `容烁,云筝` 这类多角色字段拆分。多选排除后，列表命中范围和 `/start` 提交的 `taskIds` 保持一致。
 17. 排除角色下拉增加输入搜索；搜索词只影响候选展示，不清空 `excludedRoleFilters`。已验证先搜索并勾选“容烁”，再搜索并勾选“萧燃”后，两个排除项继续保留，最终执行范围只剩未排除任务。
+18. 角色执行控制统一使用 `taskIds` 作为后端执行范围：筛选范围执行、已选批量执行、单条执行都调用同一个 `/start` 入口，避免不同入口产生不同队列语义。
+19. 角色整体暂停新增 `/api/character-jobs/:id/pause`：暂停请求会把未开始的 `queued` 行置为 `paused`，当前 `running` 行完成后队列不再取下一条。
+20. 本轮未触发真实生图任务；浏览器插件未提供可调用 DOM 工具，因此 UI 侧验收采用自动化交互测试、代码可见性检查与稳定地址 HTTP 200 可达性检查。
+21. 角色任务 `wRMQnhciToy_-bP5D7GXl` 本轮执行已核验：第 13、14、15 行均成功生成立绘，`/api/files` 返回 200；任务随后因 `CHARACTER_DIFY_MAX_TASKS_PER_RUN=3` 自动暂停。用户感知“未正常生成”的主因是页面未显式展示本轮执行上限和 45 秒任务间隔。
+22. “图片暂不可读”根因已确认：部分成功行只持久化了 Dify 签名临时文件 URL，用户稍后查看时远端返回 403，后端无法再代理图片。修复策略是新结果标准化时尽量立即缓存到 `tmp/dify-files`，并为历史成功行从已保存的 `markdown_output` base64 回填本地文件；样本 `PyMJh6MF47hbSTPgtOhVN`、`Fm-4II0PkPenqNstC1yb9` 等已验证 `/api/files` 返回 200 且 MIME 为 `image/jpeg`。
 
 ## Git 记录
 
-- HEAD：`ae01928 Add character extraction workspace`
-- 当前分支：`codex/add-newtab`
-- 推送状态：已推送到 `origin/codex/add-newtab`
-- PR：`https://github.com/fuer121/Dify-HightlightRole/pull/9`，draft，base=`main`
-- 本轮功能提交：`ae01928 Add character extraction workspace`
-- 本轮提交范围：角色工作台、角色 Dify workflow、队列恢复/限速修复、列表筛选优化与主文档同步。
+- HEAD：`de0ad9c Merge pull request #9 from fuer121/codex/add-newtab`
+- 当前分支：`codex/Prompt-upgrade`
+- 推送状态：未推送
+- PR：未创建
+- 本轮功能提交：待定
+- 本轮提交范围：角色任务单条执行、批量选择执行、整体暂停、角色立绘文件本地缓存修复与主文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -148,6 +159,7 @@
 | R-12 | 成功任务在 `status=succeeded + valueStatus=valuable` 过滤视图里重跑期间会短暂从列表消失 | 低 | 可能让用户短暂误以为任务丢失，但重新查询后即恢复一致 | 记录为后续体验优化项，不阻塞提交 |
 | R-13 | 角色队列连续出现 Dify HTTP 层 `fetch failed` | 中 | 若直接继续执行，会把剩余 queued 行快速打成失败 | 已增加限速/自动重试/小样本上限；真实样本 555-557 成功，建议继续按小批次推进 |
 | R-14 | 角色任务存在历史失败 run 缺少 raw outputs | 中 | 老失败记录只能看到“未返回立绘图片”，无法回溯 workflow 输出 | 新代码已保存失败诊断字段；旧 run 不回填 |
+| R-15 | 角色立绘远端签名 URL 会过期 | 中 | 成功任务稍后回看可能显示“图片暂不可读” | 新结果会尽量立即缓存到本地；已从历史 `markdown_output` base64 回填可修复的成功行。若远端 URL 已过期且历史 raw 中无 base64，则无法无损回填，只能重跑该行 |
 
 ## QA-01 验收脚本
 
