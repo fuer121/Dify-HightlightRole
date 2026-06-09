@@ -3,6 +3,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ParsedWorkbook } from './types.js';
 import {
+  __setLarkCliRunnerForTest,
+  exportCharacterJobToLark,
+  type LarkCliRunner
+} from './lark.js';
+import {
   __setCharacterWorkflowControlsForTest,
   createCharacterJob,
   getCharacterJob,
@@ -75,6 +80,7 @@ describe('character jobs', () => {
     delete process.env.CHARACTER_DIFY_RETRY_DELAY_MS;
     delete process.env.CHARACTER_DIFY_TASK_DELAY_MS;
     delete process.env.CHARACTER_DIFY_MAX_TASKS_PER_RUN;
+    __setLarkCliRunnerForTest();
     vi.unstubAllGlobals();
   });
 
@@ -177,6 +183,89 @@ describe('character jobs', () => {
     const scoped = getCharacterJob(job.id)!;
     expect(processedRows).toEqual([3]);
     expect(scoped.tasks.map((task) => task.status)).toEqual(['queued', 'succeeded']);
+  });
+
+  it('exports only requested character tasks to Lark with portrait and source image attachments', async () => {
+    const larkCalls: Array<{ args: string[]; cwd?: string }> = [];
+    const createdRecordPayloads: unknown[] = [];
+    const runner: LarkCliRunner = async (args, options) => {
+      larkCalls.push({ args, cwd: options?.cwd });
+      if (args.includes('+base-create')) {
+        const json = { data: { app_token: 'base-token', url: 'https://feishu.example/base/base-token' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+table-create')) {
+        const json = { data: { table_id: 'tblCharacter' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-batch-create')) {
+        const jsonArg = args[args.indexOf('--json') + 1];
+        const payloadPath = path.join(options?.cwd ?? process.cwd(), jsonArg.replace(/^@\.?\//, ''));
+        const payload = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile(payloadPath, 'utf8')));
+        createdRecordPayloads.push(payload);
+        const json = { data: { record_id_list: ['recOnlyRequested'] } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      return { stdout: '{}', stderr: '' };
+    };
+    __setLarkCliRunnerForTest(runner);
+
+    __setCharacterWorkflowControlsForTest(async (task) => ({
+      workflowRunId: `export-run-${task.row_no}`,
+      taskId: `export-task-${task.row_no}`,
+      outputs: {
+        character_name: `${task.input.role_name}-提取`,
+        description: `${task.input.role_name} 立绘描述`,
+        character_image: `https://cdn.example.com/portrait-${task.row_no}.png`
+      },
+      raw: {}
+    }));
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '默认 prompt'
+    );
+
+    startCharacterJob(job.id, [job.tasks[0].id]);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    const result = await exportCharacterJobToLark(getCharacterJob(job.id)!, [job.tasks[0].id]);
+
+    expect(result.recordsCreated).toBe(1);
+    expect(createdRecordPayloads).toHaveLength(1);
+    const tableCreateCall = larkCalls.find((call) => call.args.includes('+table-create'));
+    const tableFields = JSON.parse(tableCreateCall!.args[tableCreateCall!.args.indexOf('--fields') + 1]);
+    expect(tableFields.map((field: { name: string }) => field.name)).toEqual(expect.arrayContaining(['原段落图片', '生成立绘']));
+    expect(createdRecordPayloads[0]).toMatchObject({
+      fields: expect.arrayContaining(['行号', '小说名', '角色名', '角色描述']),
+      rows: [
+        expect.arrayContaining([
+          2,
+          'succeeded',
+          '第一瞳术师',
+          1,
+          '第1章 异世重生',
+          '云筝',
+          '段落一',
+          '云筝 立绘描述',
+          'export-run-2',
+          'export-task-2'
+        ])
+      ]
+    });
+    expect(larkCalls.filter((call) => call.args.includes('+record-upload-attachment')).map((call) => call.args[call.args.indexOf('--field-id') + 1])).toEqual([
+      '生成立绘',
+      '原段落图片'
+    ]);
   });
 
   it('uses updated character prompt for subsequent task runs', async () => {

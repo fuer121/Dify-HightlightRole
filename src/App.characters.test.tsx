@@ -275,6 +275,113 @@ describe('App characters page routing', () => {
     expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz'] });
   });
 
+  it('exports only currently filtered character tasks to Lark', async () => {
+    let exportRequestBody: string | null = null;
+    characterJobs = [
+      {
+        id: 'job-export',
+        file_name: '角色任务.xlsx',
+        sheet_name: '执行结果7',
+        status: 'completed',
+        created_at: '2026-06-09T00:00:00.000Z',
+        updated_at: '2026-06-09T00:00:00.000Z',
+        task_count: 2,
+        queued_count: 0,
+        running_count: 0,
+        succeeded_count: 2,
+        failed_count: 0,
+        paused_count: 0
+      }
+    ];
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/health')) {
+        return jsonResponse({ config: { characterDifyWorkflowName: '角色工作流', hasCharacterDifyApiKey: true } });
+      }
+      if (url.endsWith('/api/character-jobs')) return jsonResponse({ jobs: characterJobs });
+      if (url.endsWith('/api/character-jobs/job-export/export/lark')) {
+        exportRequestBody = typeof init?.body === 'string' ? init.body : null;
+        return jsonResponse({
+          baseUrl: 'https://feishu.example/base/base-token',
+          tableName: '角色立绘结果',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          recordsCreated: 1,
+          attachmentsUploaded: 2
+        });
+      }
+      if (url.endsWith('/api/character-jobs/job-export')) {
+        return jsonResponse({
+          id: 'job-export',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: 'prompt',
+          status: 'completed',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [
+            {
+              id: 'task-yz',
+              job_id: 'job-export',
+              row_no: 2,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 1,
+                chapter_name: '第1章',
+                paragraph_content: '云筝出现',
+                paragraph_image_url: 'https://cdn.example.com/a.png',
+                role_name: '云筝'
+              },
+              status: 'succeeded',
+              attempts: 1,
+              portrait_files: []
+            },
+            {
+              id: 'task-rs',
+              job_id: 'job-export',
+              row_no: 3,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 2,
+                chapter_name: '第2章',
+                paragraph_content: '容烁出现',
+                paragraph_image_url: 'https://cdn.example.com/b.png',
+                role_name: '容烁'
+              },
+              status: 'succeeded',
+              attempts: 1,
+              portrait_files: []
+            }
+          ],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-tasks/task-yz/runs')) return jsonResponse({ runs: [] });
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+
+    const input = Array.from(container.querySelectorAll('input')).find((item) => item.getAttribute('placeholder') === '输入角色名')!;
+    await act(async () => {
+      changeInputValue(input, '云筝');
+    });
+    await flushUi();
+
+    const exportButton = Array.from(container.querySelectorAll('button')).find((item) => item.textContent?.includes('导出飞书'))!;
+    await act(async () => {
+      exportButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushUi();
+
+    expect(JSON.parse(exportRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz'] });
+    expect(container.textContent).toContain('飞书 Base：1 行，2 个附件');
+  });
+
   it('excludes multiple selected role candidates from rows and start scope', async () => {
     let startRequestBody: string | null = null;
     characterJobs = [
