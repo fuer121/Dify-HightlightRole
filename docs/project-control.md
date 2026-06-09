@@ -15,8 +15,8 @@
 
 - Git 基线：`7e657e3 Merge pull request #10 from fuer121/codex/Prompt-upgrade`
 - 当前分支：`codex/change-dify-flow`
-- 工作区状态：书籍库生图链路已扩展为双工作流执行与右侧对比展示；主 workflow 继续使用 `DIFY_API_KEY`，对照 workflow 新增 `DIFY_COMPARE_API_KEY`；本机 `.env.local` 已配置真实对照 key；书籍库任务列表与右侧详情模块已支持拖拽调宽；提交范围只包含占位样例。
-- 已验证项：`npm test` 通过 10 个测试文件 77 个用例，`npm run build` 通过，`npm run lint` 通过；重启后端后 `/api/health` 返回 `difyWorkflows=[线上工作流, 对照工作流]` 且两者 `configured=true`；前端稳定地址 `http://172.16.79.76:5173/?page=books` 返回 200。
+- 工作区状态：书籍库生图链路已扩展为双工作流执行与右侧对比展示；主 workflow 继续使用 `DIFY_API_KEY`，对照 workflow 新增 `DIFY_COMPARE_API_KEY`；本机 `.env.local` 已配置真实对照 key；书籍库任务列表与右侧详情模块已支持拖拽调宽；角色形象提取新增按当前筛选范围导出飞书 Base；提交范围只包含占位样例。
+- 已验证项：`npm test` 通过 10 个测试文件 79 个用例，`npm run build` 通过，`npm run lint` 通过；重启后端后 `/api/health` 返回 `difyWorkflows=[线上工作流, 对照工作流]` 且两者 `configured=true`；前端稳定地址 `http://172.16.79.76:5173/?page=books` 返回 200。
 - PR #10 已合并功能主题：
   - 继续执行支持按筛选范围重跑已成功任务，并把真实执行 scope 写入批次日志
   - 书籍任务历史新增运行记录图片预览与双记录对比
@@ -70,6 +70,7 @@
 | IMPL-UI-01 | 侧边栏抽屉支持手动收起和展开 | 已验证 | 实现型 Agent | 用户浏览器批注、`WorkspaceSidebar`、书籍库/质量判断/角色三页容器 | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 顶层侧栏按钮可在展开/收起间切换；收起时保留图标导航并隐藏书籍列表/说明/工作流信息；三页共享状态；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 | IMPL-UI-02 | 双工作流结果卡并排展示并隐藏调试字段 | 已验证 | 实现型 Agent | 用户浏览器批注、右侧任务详情 workflow cards | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 主/对照 workflow 在任务详情中优先并排展示；隐藏 `workflow_run_id/dify_task_id` 对应的“运行/任务”字段；保留 workflow 名称、状态、图片/生成中、标题、描述和错误；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 | IMPL-UI-03 | 书籍库任务列表与详情模块支持拖拽调宽 | 已验证 | 实现型 Agent | 用户浏览器批注、书籍库中栏任务列表与右侧任务详情 | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 中栏与右栏之间提供拖拽分隔条；拖拽后右侧详情宽度持久化；窄屏自动回退单列布局；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
+| IMPL-CHAR-10 | 角色形象提取按当前筛选范围导出飞书 Base | 已验证 | 实现型 Agent | 用户确认导出范围为当前筛选，图片字段为立绘附件 + 原图附件 | `server/lark.ts`、`server/characterRoutes.ts`、`src/CharacterExtractionPage.tsx`、相关测试 | `/api/character-jobs/:id/export/lark` 只导出传入 `taskIds`；前端导出按钮提交当前筛选命中任务；飞书表包含角色字段并上传生成立绘与原段落图片附件；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支角色导出提交 |
 
 ## 线程索引
 
@@ -163,6 +164,8 @@
 36. 侧边栏折叠状态放在顶层 `App`，书籍库、质量判断、角色形象提取三页共享；折叠只影响导航展示和布局宽度，不改变当前书籍/任务/筛选/执行状态。
 37. 右侧双工作流结果卡的用户视图不展示 `workflow_run_id` 和 `dify_task_id`；这些字段保留在持久化数据中用于排查，但默认 UI 只展示 workflow 名称、状态、返图/生成中、标题、描述和错误。
 38. 书籍库任务列表与右侧任务详情之间新增拖拽分隔条；右侧宽度写入浏览器本地存储，刷新后保留；窄屏下隐藏分隔条并强制单列布局。
+39. 角色形象提取的「导出飞书」与「执行提取」共享同一范围语义：前端只提交当前筛选命中的 `taskIds`，后端校验这些任务必须属于当前 job，禁止偷偷导出全量。
+40. 角色导出飞书每次新建 Base，不追加旧 Base；生成立绘和原段落图片都走附件字段上传，queued/running/failed 行也会按当前状态写入，缺图不阻塞记录导出。
 
 ## Git 记录
 
@@ -171,7 +174,7 @@
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：书籍库双工作流配置、执行聚合、存储兼容、右侧对比展示、侧边栏折叠、任务详情拖拽调宽、测试与文档同步。
+- 本轮提交范围：书籍库双工作流配置、执行聚合、存储兼容、右侧对比展示、侧边栏折叠、任务详情拖拽调宽、角色筛选范围导出飞书 Base、测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -199,6 +202,7 @@
 | R-19 | 多角色 `角色名` 字段可能生成多人立绘 | 中 | 若目标是“一张图只出一个角色”，多角色行会产生不符合预期的双人或多人结果 | 已通过样图确认；后续应先确认拆分/主角色/允许多人三选一策略，再改执行逻辑 |
 | R-20 | 双 workflow 并行调用会把单任务 Dify 请求量翻倍 | 中 | 大批量书籍任务会同时消耗两个 workflow 的额度与上游并发能力 | 当前按用户要求并行执行；如出现限流，再切为可配置串行或工作流级限速 |
 | R-21 | 对照 workflow 输出字段若不符合既有图片字段契约 | 中 | 对照侧可能显示失败卡，但主侧成功仍会让任务继续 | 已支持 `result/result_files/files/file/image/images/image_url/image_urls/url`；失败侧保留 `raw_outputs/error` 便于追踪 |
+| R-22 | 角色导出原段落图片附件依赖 CDN 链接仍可下载 | 中 | 若原图 CDN 过期或拒绝访问，对应导出请求可能在附件上传前失败 | 当前按用户要求上传原图附件；后续如遇过期问题，可改为记录继续导出并把失败原图写入错误列 |
 
 ## QA-01 验收脚本
 

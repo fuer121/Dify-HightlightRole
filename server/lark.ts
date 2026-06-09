@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import type { Batch, LarkExportResult } from './types.js';
-import { ensureLocalFile } from './fileStore.js';
+import type { Batch, CharacterJob, CharacterTask, LarkExportResult, ResultFile } from './types.js';
+import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
 
 interface CliResult {
   stdout: string;
@@ -15,12 +15,14 @@ interface RunLarkOptions {
   cwd?: string;
 }
 
+export type LarkCliRunner = (args: string[], options?: RunLarkOptions) => Promise<CliResult>;
+
 function asIdentityArg() {
   const value = process.env.LARK_CLI_AS || 'user';
   return ['--as', value];
 }
 
-function runLark(args: string[], options: RunLarkOptions = {}): Promise<CliResult> {
+function defaultRunLark(args: string[], options: RunLarkOptions = {}): Promise<CliResult> {
   return new Promise((resolve, reject) => {
     const child = spawn('lark-cli', args, {
       cwd: options.cwd ?? process.cwd(),
@@ -46,6 +48,16 @@ function runLark(args: string[], options: RunLarkOptions = {}): Promise<CliResul
       reject(new Error(formatCliError(code, stdout, stderr)));
     });
   });
+}
+
+let larkCliRunner: LarkCliRunner = defaultRunLark;
+
+function runLark(args: string[], options: RunLarkOptions = {}): Promise<CliResult> {
+  return larkCliRunner(args, options);
+}
+
+export function __setLarkCliRunnerForTest(runner?: LarkCliRunner) {
+  larkCliRunner = runner ?? defaultRunLark;
 }
 
 function parseJson(text: string): unknown {
@@ -186,6 +198,51 @@ const TABLE_FIELDS = [
   { name: '错误', type: 'text' }
 ];
 
+const CHARACTER_FIELDS = [
+  '行号',
+  '状态',
+  '小说名',
+  '章节序号',
+  '章节名',
+  '角色名',
+  '段落内容',
+  '角色描述',
+  '结果文本',
+  'workflow_run_id',
+  'dify_task_id',
+  '耗时',
+  '错误'
+];
+
+const CHARACTER_TABLE_FIELDS = [
+  { name: '行号', type: 'number', style: { type: 'plain', precision: 0 } },
+  {
+    name: '状态',
+    type: 'select',
+    multiple: false,
+    options: [
+      { name: 'queued', hue: 'Blue', lightness: 'Lighter' },
+      { name: 'running', hue: 'Orange', lightness: 'Light' },
+      { name: 'succeeded', hue: 'Green', lightness: 'Light' },
+      { name: 'failed', hue: 'Red', lightness: 'Light' },
+      { name: 'paused', hue: 'Gray', lightness: 'Light' }
+    ]
+  },
+  { name: '小说名', type: 'text' },
+  { name: '章节序号', type: 'number', style: { type: 'plain', precision: 0 } },
+  { name: '章节名', type: 'text' },
+  { name: '角色名', type: 'text' },
+  { name: '段落内容', type: 'text' },
+  { name: '原段落图片', type: 'attachment' },
+  { name: '生成立绘', type: 'attachment' },
+  { name: '角色描述', type: 'text' },
+  { name: '结果文本', type: 'text' },
+  { name: 'workflow_run_id', type: 'text' },
+  { name: 'dify_task_id', type: 'text' },
+  { name: '耗时', type: 'number', style: { type: 'plain', precision: 1 } },
+  { name: '错误', type: 'text' }
+];
+
 function formatRawValue(value: unknown) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value;
@@ -212,6 +269,25 @@ function taskToRow(task: Batch['tasks'][number]) {
   ];
 }
 
+function characterTaskToRow(task: CharacterTask) {
+  const raw = task.raw_outputs ? JSON.stringify(task.raw_outputs, null, 2) : '';
+  return [
+    task.row_no,
+    task.status,
+    task.input.novel_name,
+    task.input.chapter_sort,
+    task.input.chapter_name,
+    task.input.role_name,
+    task.input.paragraph_content,
+    task.extracted_description ?? '',
+    task.result_text ?? raw,
+    task.workflow_run_id ?? '',
+    task.dify_task_id ?? '',
+    task.elapsed_seconds ?? null,
+    task.error ?? ''
+  ];
+}
+
 async function createBase(name: string) {
   const result = await runLark(['base', '+base-create', ...asIdentityArg(), '--name', name, '--time-zone', 'Asia/Shanghai']);
   const info = extractBaseInfo(result.json);
@@ -225,6 +301,10 @@ async function createBase(name: string) {
 }
 
 async function createTable(baseToken: string, tableName: string) {
+  return createTableWithFields(baseToken, tableName, TABLE_FIELDS);
+}
+
+async function createTableWithFields(baseToken: string, tableName: string, fields: unknown[]) {
   const result = await runLark([
     'base',
     '+table-create',
@@ -234,7 +314,7 @@ async function createTable(baseToken: string, tableName: string) {
     '--name',
     tableName,
     '--fields',
-    JSON.stringify(TABLE_FIELDS),
+    JSON.stringify(fields),
     '--view',
     JSON.stringify([{ name: '默认表格', type: 'grid' }])
   ]);
@@ -257,6 +337,38 @@ async function batchCreateRecords(baseToken: string, tableId: string, batch: Bat
     const filePath = path.join(tempDir, `records-${batch.id}-${index}-${nanoid(6)}.json`);
     const payload = {
       fields: FIELDS,
+      rows: rows.slice(index, index + 200)
+    };
+    await writeFile(filePath, JSON.stringify(payload), 'utf8');
+    const fileDir = path.dirname(filePath);
+    const result = await runLark([
+      'base',
+      '+record-batch-create',
+      ...asIdentityArg(),
+      '--base-token',
+      baseToken,
+      '--table-id',
+      tableId,
+      '--json',
+      `@${relativeCliPath(filePath)}`
+    ], { cwd: fileDir });
+    recordIds.push(...extractRecordIds(result.json));
+  }
+  return recordIds;
+}
+
+async function characterBatchCreateRecords(baseToken: string, tableId: string, jobId: string, tasks: CharacterTask[]) {
+  const rows = tasks.map(characterTaskToRow);
+  if (rows.length === 0) return [];
+
+  const tempDir = path.resolve(process.cwd(), 'tmp', 'lark-export');
+  await mkdir(tempDir, { recursive: true });
+
+  const recordIds: string[] = [];
+  for (let index = 0; index < rows.length; index += 200) {
+    const filePath = path.join(tempDir, `character-records-${jobId}-${index}-${nanoid(6)}.json`);
+    const payload = {
+      fields: CHARACTER_FIELDS,
       rows: rows.slice(index, index + 200)
     };
     await writeFile(filePath, JSON.stringify(payload), 'utf8');
@@ -307,6 +419,56 @@ async function uploadAttachments(baseToken: string, tableId: string, batch: Batc
   return uploaded;
 }
 
+async function uploadFileAttachment(baseToken: string, tableId: string, recordId: string, fieldName: string, file: ResultFile) {
+  const filePath = await ensureLocalFile(file);
+  const fileDir = path.dirname(filePath);
+  await runLark([
+    'base',
+    '+record-upload-attachment',
+    ...asIdentityArg(),
+    '--base-token',
+    baseToken,
+    '--table-id',
+    tableId,
+    '--record-id',
+    recordId,
+    '--field-id',
+    fieldName,
+    '--file',
+    relativeCliPath(filePath)
+  ], { cwd: fileDir });
+}
+
+async function registerParagraphImage(task: CharacterTask) {
+  const url = task.input.paragraph_image_url.trim();
+  if (!url) return undefined;
+  if (/^data:image\/[^;]+;base64,/.test(url)) {
+    return registerBase64File(task.id, url, `source-${task.row_no}.png`);
+  }
+  return registerRemoteFile(task.id, url, `source-${task.row_no}${path.extname(new URL(url).pathname) || '.png'}`);
+}
+
+async function uploadCharacterAttachments(baseToken: string, tableId: string, tasks: CharacterTask[], recordIds: string[]) {
+  let uploaded = 0;
+  for (let index = 0; index < tasks.length; index += 1) {
+    const task = tasks[index];
+    const recordId = recordIds[index];
+    if (!recordId) continue;
+
+    for (const file of task.portrait_files) {
+      await uploadFileAttachment(baseToken, tableId, recordId, '生成立绘', file);
+      uploaded += 1;
+    }
+
+    const paragraphImage = await registerParagraphImage(task);
+    if (paragraphImage) {
+      await uploadFileAttachment(baseToken, tableId, recordId, '原段落图片', paragraphImage);
+      uploaded += 1;
+    }
+  }
+  return uploaded;
+}
+
 export async function exportBatchToLark(batch: Batch): Promise<LarkExportResult> {
   const baseName = `Dify 批量结果 ${larkDate()}`;
   const tableName = '批量结果';
@@ -314,6 +476,35 @@ export async function exportBatchToLark(batch: Batch): Promise<LarkExportResult>
   const tableId = await createTable(baseToken, tableName);
   const recordIds = await batchCreateRecords(baseToken, tableId, batch);
   const attachmentsUploaded = await uploadAttachments(baseToken, tableId, batch, recordIds);
+
+  return {
+    baseToken,
+    baseUrl,
+    tableId,
+    tableName,
+    createdAt: new Date().toISOString(),
+    recordsCreated: recordIds.length,
+    attachmentsUploaded
+  };
+}
+
+export async function exportCharacterJobToLark(job: CharacterJob, taskIds: string[]): Promise<LarkExportResult> {
+  const requestedIds = Array.from(new Set(taskIds));
+  if (requestedIds.length === 0) throw new Error('导出范围不能为空');
+
+  const jobTaskIds = new Set(job.tasks.map((task) => task.id));
+  if (requestedIds.some((taskId) => !jobTaskIds.has(taskId))) {
+    throw new Error('导出范围包含不存在的角色任务');
+  }
+
+  const requestedIdSet = new Set(requestedIds);
+  const tasks = job.tasks.filter((task) => requestedIdSet.has(task.id));
+  const baseName = `角色形象提取 ${job.fileName} ${larkDate()}`;
+  const tableName = '角色立绘结果';
+  const { baseToken, baseUrl } = await createBase(baseName);
+  const tableId = await createTableWithFields(baseToken, tableName, CHARACTER_TABLE_FIELDS);
+  const recordIds = await characterBatchCreateRecords(baseToken, tableId, job.id, tasks);
+  const attachmentsUploaded = await uploadCharacterAttachments(baseToken, tableId, tasks, recordIds);
 
   return {
     baseToken,

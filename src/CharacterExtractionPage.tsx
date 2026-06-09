@@ -127,6 +127,16 @@ interface CharacterTaskRunRecord {
   created_at: string;
 }
 
+interface LarkExportResult {
+  baseToken?: string;
+  baseUrl?: string;
+  tableId?: string;
+  tableName: string;
+  createdAt: string;
+  recordsCreated: number;
+  attachmentsUploaded: number;
+}
+
 interface HealthPayload {
   config?: {
     hasCharacterDifyApiKey?: boolean;
@@ -236,6 +246,8 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
   const [isCreating, setCreating] = useState(false);
   const [isStarting, setStarting] = useState(false);
   const [isPausing, setPausing] = useState(false);
+  const [isExporting, setExporting] = useState(false);
+  const [characterExport, setCharacterExport] = useState<LarkExportResult | null>(null);
   const [isSavingPrompt, setSavingPrompt] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -307,6 +319,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
     setJobs(payload.jobs);
     const nextSelectedId = preferredJobId ?? selectedJobId ?? payload.jobs[0]?.id ?? null;
     setSelectedJobId(nextSelectedId);
+    setCharacterExport(null);
     if (nextSelectedId) {
       const detail = await fetch(`/api/character-jobs/${nextSelectedId}`).then((response) => readJson<CharacterJob>(response));
       setJob(detail);
@@ -405,6 +418,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
       setJob(nextJob);
       setJobPromptDraft(nextJob.promptText || DEFAULT_CHARACTER_PROMPT);
       setSelectedTaskId(nextJob.tasks[0]?.id ?? null);
+      setCharacterExport(null);
       await refreshJobs(nextJob.id);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : '创建角色任务失败');
@@ -490,6 +504,28 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
       setError(pauseError instanceof Error ? pauseError.message : '暂停角色任务失败');
     } finally {
       setPausing(false);
+    }
+  }
+
+  async function exportToLark() {
+    if (!job) return;
+    if (filteredTaskIds.length === 0) {
+      setError('当前筛选范围没有可导出任务');
+      return;
+    }
+    setError(null);
+    setExporting(true);
+    try {
+      const result = await fetch(`/api/character-jobs/${job.id}/export/lark`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskIds: filteredTaskIds })
+      }).then((response) => readJson<LarkExportResult>(response));
+      setCharacterExport(result);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : '导出飞书失败');
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -664,8 +700,17 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
                   {isPausing ? <Loader2 className="spin" size={14} /> : <PauseCircle size={14} />}
                   暂停整体任务
                 </button>
+                <button className="secondary-action" onClick={() => void exportToLark()} disabled={isExporting || filteredTasks.length === 0}>
+                  {isExporting ? <Loader2 className="spin" size={14} /> : <Database size={14} />}
+                  导出飞书
+                </button>
               </div>
               <p className="field-hint">执行范围以右侧当前筛选列表为准。</p>
+              {characterExport?.baseUrl && (
+                <a className="export-link" href={characterExport.baseUrl} target="_blank" rel="noreferrer">
+                  飞书 Base：{characterExport.recordsCreated} 行，{characterExport.attachmentsUploaded} 个附件
+                </a>
+              )}
             </div>
           )}
 

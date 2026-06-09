@@ -12,6 +12,7 @@ import {
   subscribeCharacterJob,
   updateCharacterJobPrompt
 } from './characters.js';
+import { exportCharacterJobToLark } from './lark.js';
 
 interface RegisterCharacterRouteOptions {
   getWorkbook: (workbookId: string) => ParsedWorkbook | undefined;
@@ -86,6 +87,30 @@ export function registerCharacterRoutes(app: express.Express, options: RegisterC
     const job = pauseCharacterJob(req.params.id);
     res.json(job);
   });
+
+  app.post(
+    '/api/character-jobs/:id/export/lark',
+    asyncHandler(async (req, res) => {
+      const { taskIds } = req.body as { taskIds?: unknown };
+      if (!Array.isArray(taskIds) || taskIds.length === 0 || taskIds.some((taskId) => typeof taskId !== 'string')) {
+        res.status(400).json({ error: 'taskIds 必须是非空字符串数组' });
+        return;
+      }
+      const jobId = typeof req.params.id === 'string' ? req.params.id : '';
+      const job = getCharacterJob(jobId);
+      if (!job) {
+        res.status(404).json({ error: '角色任务不存在' });
+        return;
+      }
+      const jobTaskIds = new Set(job.tasks.map((task) => task.id));
+      if (taskIds.some((taskId) => !jobTaskIds.has(taskId))) {
+        res.status(400).json({ error: '导出范围包含不存在的角色任务' });
+        return;
+      }
+      const result = await exportCharacterJobToLark(job, taskIds);
+      res.json(result);
+    })
+  );
 
   app.post('/api/character-jobs/:id/retry-failed', (req, res) => {
     const job = retryCharacterFailed(req.params.id);
