@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { autoMapHeaders, compileRows, normalizeUploadFileName, parseWorkbook } from './workbooks.js';
+import {
+  autoMapCharacterHeaders,
+  autoMapHeaders,
+  compileCharacterRows,
+  compileRows,
+  normalizeUploadFileName,
+  parseWorkbook
+} from './workbooks.js';
 
 function workbookBuffer(rows: unknown[][]) {
   const workbook = XLSX.utils.book_new();
@@ -101,5 +108,57 @@ describe('workbooks', () => {
     });
 
     expect(rows[0].error).toContain('书籍 ID 必须是数字');
+  });
+
+  it('auto maps character extraction headers from the reference workbook shape', () => {
+    expect(
+      autoMapCharacterHeaders([
+        '章节序号',
+        'book_title',
+        'chapter_title',
+        'paragraph_content',
+        'hightlight_image_url',
+        'roles'
+      ])
+    ).toEqual({
+      novel_name: 'book_title',
+      chapter_sort: '章节序号',
+      chapter_name: 'chapter_title',
+      paragraph_content: 'paragraph_content',
+      paragraph_image_url: 'hightlight_image_url',
+      role_name: 'roles'
+    });
+  });
+
+  it('compiles character extraction rows and validates required columns', () => {
+    const workbook = parseWorkbook(
+      workbookBuffer([
+        ['章节序号', 'book_title', 'chapter_title', 'paragraph_content', 'hightlight_image_url', 'roles'],
+        [1, '第一瞳术师', '第1章', '段落内容', 'https://cdn.example.com/image.png', '云筝']
+      ]),
+      'character.xlsx'
+    );
+
+    const rows = compileCharacterRows(workbook.sheets[0], {
+      novel_name: 'book_title',
+      chapter_sort: '章节序号',
+      chapter_name: 'chapter_title',
+      paragraph_content: 'paragraph_content',
+      paragraph_image_url: 'hightlight_image_url',
+      role_name: 'roles'
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      row_no: 2,
+      input: {
+        novel_name: '第一瞳术师',
+        chapter_sort: 1,
+        chapter_name: '第1章',
+        paragraph_content: '段落内容',
+        paragraph_image_url: 'https://cdn.example.com/image.png',
+        role_name: '云筝'
+      }
+    });
   });
 });

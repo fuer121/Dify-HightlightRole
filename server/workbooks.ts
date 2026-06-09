@@ -1,6 +1,13 @@
 import { nanoid } from 'nanoid';
 import * as XLSX from 'xlsx';
-import type { ColumnMapping, ParsedSheet, ParsedWorkbook, RequiredInputKey } from './types.js';
+import type {
+  CharacterColumnMapping,
+  CharacterInputKey,
+  ColumnMapping,
+  ParsedSheet,
+  ParsedWorkbook,
+  RequiredInputKey
+} from './types.js';
 
 const REQUIRED_KEYS: RequiredInputKey[] = ['book_id', 'paragraph_content', 'chapter_sort'];
 
@@ -8,6 +15,24 @@ const HEADER_ALIASES: Record<RequiredInputKey, string[]> = {
   book_id: ['book_id', 'bookid', '书籍id', '书籍ID', '书籍 id', '书籍编号'],
   paragraph_content: ['paragraph_content', 'paragraph', 'content', '段落内容', '高光段落', '正文', '片段内容'],
   chapter_sort: ['chapter_sort', 'chaptersort', '章节序号', '章节', '章节排序', 'chapter']
+};
+
+const CHARACTER_HEADER_ALIASES: Record<CharacterInputKey, string[]> = {
+  novel_name: ['novel_name', 'book_title', '小说名', '书名', '作品名'],
+  chapter_sort: ['chapter_sort', 'chaptersort', '章节序号', '章节', '章节排序', 'chapter'],
+  chapter_name: ['chapter_name', 'chapter_title', '章节名', '章节标题'],
+  paragraph_content: ['paragraph_content', 'paragraph', 'content', '段落内容', '高光段落', '正文', '片段内容'],
+  paragraph_image_url: [
+    'paragraph_image_url',
+    'hightlight_image_url',
+    'highlight_image_url',
+    'image_url',
+    '段落图片',
+    '段落图片cdn链接',
+    '高光场景图',
+    '图片链接'
+  ],
+  role_name: ['role_name', 'roles', '角色名', '角色', '人物名']
 };
 
 const normalizeHeader = (value: string) =>
@@ -40,6 +65,23 @@ export function autoMapHeaders(headers: string[]): Partial<ColumnMapping> {
   const mapping: Partial<ColumnMapping> = {};
   for (const key of REQUIRED_KEYS) {
     const aliases = HEADER_ALIASES[key].map(normalizeHeader);
+    const hit = normalized.find((item) => aliases.includes(item.normalized));
+    if (hit) {
+      mapping[key] = hit.header;
+    }
+  }
+  return mapping;
+}
+
+export function autoMapCharacterHeaders(headers: string[]): Partial<CharacterColumnMapping> {
+  const normalized = headers.map((header) => ({
+    header,
+    normalized: normalizeHeader(header)
+  }));
+
+  const mapping: Partial<CharacterColumnMapping> = {};
+  for (const key of Object.keys(CHARACTER_HEADER_ALIASES) as CharacterInputKey[]) {
+    const aliases = CHARACTER_HEADER_ALIASES[key].map(normalizeHeader);
     const hit = normalized.find((item) => aliases.includes(item.normalized));
     if (hit) {
       mapping[key] = hit.header;
@@ -103,7 +145,8 @@ export function parseWorkbook(buffer: Buffer, fileName: string): ParsedWorkbook 
       rows,
       previewRows: rows.slice(0, 8),
       rowCount: rows.length,
-      autoMapping: autoMapHeaders(headers)
+      autoMapping: autoMapHeaders(headers),
+      characterAutoMapping: autoMapCharacterHeaders(headers)
     };
   });
 
@@ -143,6 +186,10 @@ interface CompileRowsOptions {
   rowLimit?: number;
 }
 
+interface CompileCharacterRowsOptions {
+  rowLimit?: number;
+}
+
 export function compileRows(sheet: ParsedSheet, mapping: ColumnMapping, options: CompileRowsOptions = {}) {
   const missing = REQUIRED_KEYS.filter((key) => !mapping[key] || !sheet.headers.includes(mapping[key]));
   if (missing.length > 0) {
@@ -171,6 +218,62 @@ export function compileRows(sheet: ParsedSheet, mapping: ColumnMapping, options:
             book_id: Number(row[mapping.book_id]) || 0,
             paragraph_content: String(row[mapping.paragraph_content] ?? ''),
             chapter_sort: Number(row[mapping.chapter_sort]) || 0
+          },
+          error: error instanceof Error ? error.message : '字段校验失败'
+        };
+      }
+    });
+}
+
+function parseText(value: unknown, label: string) {
+  const text = String(value ?? '').trim();
+  if (!text) throw new Error(`${label} 为空`);
+  return text;
+}
+
+function parseImageUrl(value: unknown) {
+  const text = parseText(value, '段落图片链接');
+  if (!/^https?:\/\//i.test(text)) {
+    throw new Error('段落图片链接必须是 http/https 地址');
+  }
+  return text;
+}
+
+export function compileCharacterRows(sheet: ParsedSheet, mapping: CharacterColumnMapping, options: CompileCharacterRowsOptions = {}) {
+  const requiredKeys = Object.keys(CHARACTER_HEADER_ALIASES) as CharacterInputKey[];
+  const missing = requiredKeys.filter((key) => !mapping[key] || !sheet.headers.includes(mapping[key]));
+  if (missing.length > 0) {
+    throw new Error(`字段映射缺失：${missing.join(', ')}`);
+  }
+
+  return sheet.rows
+    .filter((row) => sheet.headers.some((header) => String(row[header] ?? '').trim() !== ''))
+    .slice(0, options.rowLimit)
+    .map((row) => {
+      const rowNo = Number(row.__row_no ?? 0);
+      try {
+        return {
+          row_no: rowNo,
+          input: {
+            novel_name: parseText(row[mapping.novel_name], '小说名'),
+            chapter_sort: parseNumber(row[mapping.chapter_sort], '章节序号'),
+            chapter_name: parseText(row[mapping.chapter_name], '章节名'),
+            paragraph_content: parseParagraph(row[mapping.paragraph_content]),
+            paragraph_image_url: parseImageUrl(row[mapping.paragraph_image_url]),
+            role_name: parseText(row[mapping.role_name], '角色名')
+          },
+          error: undefined
+        };
+      } catch (error) {
+        return {
+          row_no: rowNo,
+          input: {
+            novel_name: String(row[mapping.novel_name] ?? ''),
+            chapter_sort: Number(row[mapping.chapter_sort]) || 0,
+            chapter_name: String(row[mapping.chapter_name] ?? ''),
+            paragraph_content: String(row[mapping.paragraph_content] ?? ''),
+            paragraph_image_url: String(row[mapping.paragraph_image_url] ?? ''),
+            role_name: String(row[mapping.role_name] ?? '')
           },
           error: error instanceof Error ? error.message : '字段校验失败'
         };

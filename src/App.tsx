@@ -24,12 +24,13 @@ import {
   XCircle
 } from 'lucide-react';
 import { getRunIsValidValue } from './runIsValid';
+import { CharacterExtractionPage } from './CharacterExtractionPage';
 
 type RequiredInputKey = 'book_id' | 'paragraph_content' | 'chapter_sort';
 type Mapping = Record<RequiredInputKey, string>;
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused';
 type StatusFilter = TaskStatus | 'all';
-type AppPage = 'books' | 'quality';
+type AppPage = 'books' | 'quality' | 'characters';
 type ImagePresenceFilter = 'all' | 'yes' | 'no';
 type ValueStatusFilter = 'all' | 'valuable' | 'not_valuable' | 'unknown';
 type RangeFilterMode = 'chapter' | 'row';
@@ -587,7 +588,8 @@ function describeTaskQueryScope(queryState: TaskQueryState) {
 
 export function App() {
   const initialPageParam = new URLSearchParams(window.location.search).get('page');
-  const initialPage: AppPage = initialPageParam === 'quality' ? 'quality' : 'books';
+  const initialPage: AppPage =
+    initialPageParam === 'quality' ? 'quality' : initialPageParam === 'characters' ? 'characters' : 'books';
   const [page, setPage] = useState<AppPage>(initialPage);
   const [difyWorkflowName, setDifyWorkflowName] = useState('LL-段落高光生图-效果测试');
 
@@ -607,7 +609,7 @@ export function App() {
   function updatePage(nextPage: AppPage) {
     setPage(nextPage);
     const url = new URL(window.location.href);
-    if (nextPage === 'quality') {
+    if (nextPage === 'quality' || nextPage === 'characters') {
       url.searchParams.set('page', nextPage);
     } else {
       url.searchParams.delete('page');
@@ -619,6 +621,8 @@ export function App() {
     <main className="app-shell side-shell">
       {page === 'quality' ? (
         <QualityWorkspace onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
+      ) : page === 'characters' ? (
+        <CharacterWorkspace onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
       ) : (
         <BooksManagementPage page={page} onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
       )}
@@ -660,6 +664,10 @@ function WorkspaceSidebar({
           <SlidersHorizontal size={16} />
           质量判断
         </button>
+        <button className={page === 'characters' ? 'active' : ''} onClick={() => onChange('characters')}>
+          <ImageIcon size={16} />
+          角色形象提取
+        </button>
       </nav>
       {children}
       <div className="sidebar-workflow-info" aria-label="当前 Dify 工作流">
@@ -681,6 +689,22 @@ function QualityWorkspace({ onNavigate, difyWorkflowName }: { onNavigate: (page:
       </WorkspaceSidebar>
       <section className="workspace-content quality-workspace-content">
         <QualityPromptPage />
+      </section>
+    </div>
+  );
+}
+
+function CharacterWorkspace({ onNavigate, difyWorkflowName }: { onNavigate: (page: AppPage) => void; difyWorkflowName: string }) {
+  return (
+    <div className="workspace-frame">
+      <WorkspaceSidebar page="characters" onChange={onNavigate} difyWorkflowName={difyWorkflowName}>
+        <div className="sidebar-note">
+          <ImageIcon size={16} />
+          <span>从段落场景图中提取主要人物，并生成纯白背景人物立绘。</span>
+        </div>
+      </WorkspaceSidebar>
+      <section className="workspace-content quality-workspace-content">
+        <CharacterExtractionPage difyWorkflowName={difyWorkflowName} />
       </section>
     </div>
   );
