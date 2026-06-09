@@ -1,0 +1,551 @@
+app:
+  description: 从高光场景图中锁定主要人物，生成纯白背景的人物立绘，输出角色名、角色描述和立绘图片。
+  icon: 🧍
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: LL-角色形象提取-白底立绘
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: bowenliang123/base64_codec:1.0.1@034fdfa9602a2b207c0009adecb8998344dbb4f74a223c88680b477c83ee783b
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.15@725407927b04e236212083d20e92830d60fa944e42cd357ef6902c160414f6f1
+    version: null
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 600
+        batch_count_limit: 5
+        file_size_limit: 600
+        image_file_batch_limit: 10
+        image_file_size_limit: 600
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 600
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: 2100000000001-source-2100000000002-target
+      source: '2100000000001'
+      sourceHandle: source
+      target: '2100000000002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 2100000000002-source-2100000000003-target
+      source: '2100000000002'
+      sourceHandle: source
+      target: '2100000000003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 2100000000003-source-2100000000004-target
+      source: '2100000000003'
+      sourceHandle: source
+      target: '2100000000004'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 2100000000004-source-2100000000005-target
+      source: '2100000000004'
+      sourceHandle: source
+      target: '2100000000005'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: tool
+      id: 2100000000005-source-2100000000006-target
+      source: '2100000000005'
+      sourceHandle: source
+      target: '2100000000006'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: end
+      id: 2100000000006-source-2100000000007-target
+      source: '2100000000006'
+      sourceHandle: source
+      target: '2100000000007'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: ''
+          hint: 可选，用于辅助 Prompt 生成
+          label: 小说名
+          max_length: 256
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: novel_name
+        - default: ''
+          hint: 可选，用于辅助 Prompt 生成
+          label: 章节序号
+          max_length: 48
+          options: []
+          placeholder: ''
+          required: false
+          type: number
+          variable: chapter_sort
+        - default: ''
+          hint: 可选，用于辅助 Prompt 生成
+          label: 章节名
+          max_length: 256
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: chapter_name
+        - default: ''
+          hint: 用于补充角色状态、服装、情绪和身份
+          label: 段落内容
+          max_length: 100000
+          options: []
+          placeholder: ''
+          required: false
+          type: paragraph
+          variable: paragraph_content
+        - default: ''
+          hint: 必填。高光场景图的 CDN 链接
+          label: 段落图片链接
+          max_length: 2000
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: paragraph_image_url
+        - default: ''
+          hint: 可选。若给定角色名，则优先以该角色为主体
+          label: 角色名
+          max_length: 256
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: role_name
+        - default: ''
+          hint: 可选。为空时使用系统默认角色立绘 Prompt
+          label: 角色立绘 Prompt
+          max_length: 100000
+          options: []
+          placeholder: ''
+          required: false
+          type: paragraph
+          variable: character_prompt
+      height: 300
+      id: '2100000000001'
+      position:
+        x: 60
+        y: 200
+      positionAbsolute:
+        x: 60
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 2100000000002-system
+          role: system
+          text: "你是一名小说角色立绘 Prompt 设计师。你的任务不是复述剧情，而是帮助图生图模型从一张已有场景图中稳定提取主要人物，并生成纯白背景的单人角色立绘。\n\n你会收到：小说名、章节信息、段落内容、角色名（可能为空）、以及一段可选的额外 Prompt。\n\n你的输出必须是两行，严格按照以下格式：\n角色:角色名\n描述:立绘描述\n\n规则：\n1. 如果给定角色名，则优先使用该角色名作为主体；如果为空，则输出“主要人物”。\n2. 描述必须面向图生图模型，重点强调：单人、全身或半身完整、纯白背景、正面或三分之二侧面、人物边缘清晰、不要场景、不要多人、不要文字水印。\n3. 角色外观尽量从段落内容中提取稳定信息：性别、年龄感、发型、气质、服饰、显著道具。如果段落没写，就不要瞎编具体颜色和复杂设定，只保留“按原场景图主人物外观提取”。\n4. 禁止输出解释、禁止加序号、禁止输出 Markdown。\n5. 如果用户提供额外 Prompt，要自然吸收进“描述”里，但仍要保证白底立绘约束优先。\n6. 描述要能直接作为图片生成 prompt 使用，语言精炼，60-180 字。"
+        - id: 2100000000002-user
+          role: user
+          text: "小说名：{{#2100000000001.novel_name#}}\n章节序号：{{#2100000000001.chapter_sort#}}\n章节名：{{#2100000000001.chapter_name#}}\n角色名：{{#2100000000001.role_name#}}\n段落内容：{{#2100000000001.paragraph_content#}}\n额外 Prompt：{{#2100000000001.character_prompt#}}"
+        selected: false
+        title: 角色提取与立绘描述
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '2100000000002'
+      position:
+        x: 380
+        y: 220
+      positionAbsolute:
+        x: 380
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "import json\n\ndef main(text: str, paragraph_image_url: str, role_name: str):\n    content = (text or '').strip()\n    lines = [line.strip() for line in content.splitlines() if line.strip()]\n    character_name = role_name.strip() or '主要人物'\n    description = ''\n\n    for line in lines:\n        if line.startswith('角色:'):\n            value = line.split(':', 1)[1].strip()\n            if value:\n                character_name = value\n        elif line.startswith('描述:'):\n            value = line.split(':', 1)[1].strip()\n            if value:\n                description = value\n\n    if not description:\n        description = (\n            f'提取场景图中的主要人物 {character_name}，保留人物原有五官、发型、服饰与气质，'\n            '生成单人纯白背景人物立绘，人物完整清晰，边缘干净，不要场景，不要多人，不要文字水印。'\n        )\n\n    final_prompt = description\n    payload = {\n        'app_id': 'img2img-gen',\n        'inputs': {\n            'prompt': final_prompt,\n            'neg_prompt': '多人, 复杂背景, 场景, 杂乱道具, 文字, 水印, 模糊, 低清晰度, 裁切, 残缺肢体, 多余手指, 黑色背景, 灰色背景, 彩色背景',\n            'ref_image_urls': paragraph_image_url,\n            'width': '768',\n            'height': '1024',\n            'num_images_per_prompt': '1',\n            'quality': 'medium',\n            'output_format': 'jpeg',\n            'gen_user': 'system',\n            'output_compression': 50,\n            'image_gen_timeout': '360'\n        },\n        'stream': False\n    }\n\n    return {\n        'character_name': character_name,\n        'description': description,\n        'request_body': json.dumps(payload, ensure_ascii=False)\n    }\n"
+        code_language: python3
+        outputs:
+          character_name:
+            children: null
+            type: string
+          description:
+            children: null
+            type: string
+          request_body:
+            children: null
+            type: string
+        selected: false
+        title: 组装立绘请求
+        type: code
+        variables:
+        - value_selector:
+          - '2100000000002'
+          - text
+          value_type: string
+          variable: text
+        - value_selector:
+          - '2100000000001'
+          - paragraph_image_url
+          value_type: string
+          variable: paragraph_image_url
+        - value_selector:
+          - '2100000000001'
+          - role_name
+          value_type: string
+          variable: role_name
+      height: 52
+      id: '2100000000003'
+      position:
+        x: 700
+        y: 220
+      positionAbsolute:
+        x: 700
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-2104
+            key: ''
+            type: text
+            value: '{{#2100000000003.request_body#}}'
+          type: json
+        headers: 'accept:application/json
+
+          Content-Type:application/json'
+        method: POST
+        params: ''
+        retry_config:
+          max_retries: 1
+          retry_enabled: false
+          retry_interval: 100
+        selected: false
+        ssl_verify: false
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 立绘生成请求
+        type: http-request
+        url: https://api-ai-flow-t2.qmniu.com/api/v1/run
+        variables: []
+      height: 108
+      id: '2100000000004'
+      position:
+        x: 1020
+        y: 220
+      positionAbsolute:
+        x: 1020
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "\nimport json\n\ndef _as_dict(value):\n    return value if isinstance(value, dict) else {}\n\ndef _first_non_empty_list(*values):\n    for value in values:\n        if isinstance(value, list) and len(value) > 0:\n            return value\n    return []\n\ndef _normalize_detail(value):\n    if isinstance(value, list):\n        return '；'.join(json.dumps(item, ensure_ascii=False) if isinstance(item, (dict, list)) else str(item) for item in value)\n    if isinstance(value, dict):\n        return json.dumps(value, ensure_ascii=False)\n    return str(value)\n\ndef main(arg1: str, character_name: str, description: str):\n    json_arg = json.loads(arg1 or '{}')\n    data = _as_dict(json_arg)\n    output = _as_dict(data.get('output'))\n    result = _as_dict(data.get('result'))\n    payload = _as_dict(data.get('data'))\n    payload_output = _as_dict(payload.get('output'))\n    image_b64 = _first_non_empty_list(\n        output.get('images_b64'),\n        result.get('images_b64'),\n        data.get('images_b64'),\n        payload_output.get('images_b64'),\n        payload.get('images_b64')\n    )\n    if not image_b64:\n        detail = data.get('detail')\n        if detail is not None:\n            raise ValueError(f\"立绘生成接口返回错误：{_normalize_detail(detail)}\")\n        raise ValueError(f\"未找到 images_b64，可用顶层字段: {list(data.keys())}\")\n    first_image = str(image_b64[0]).strip()\n    if not first_image:\n        raise ValueError('images_b64 为空')\n    mime_type = 'image/png'\n    markdown_image = f\"![角色立绘](data:{mime_type};base64,{first_image})\"\n    return {\n        'character_name': character_name,\n        'description': description,\n        'result': first_image,\n        'markdown_output': markdown_image\n    }\n"
+        code_language: python3
+        outputs:
+          character_name:
+            children: null
+            type: string
+          description:
+            children: null
+            type: string
+          markdown_output:
+            children: null
+            type: string
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 解析立绘结果
+        type: code
+        variables:
+        - value_selector:
+          - '2100000000004'
+          - body
+          value_type: string
+          variable: arg1
+        - value_selector:
+          - '2100000000003'
+          - character_name
+          value_type: string
+          variable: character_name
+        - value_selector:
+          - '2100000000003'
+          - description
+          value_type: string
+          variable: description
+      height: 52
+      id: '2100000000005'
+      position:
+        x: 1340
+        y: 220
+      positionAbsolute:
+        x: 1340
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: Base64 encoded image string, default convert to PNG, support PNG and JPG data URLs
+            ja_JP: Base64 encoded image string
+            pt_BR: Base64 encoded image string
+            zh_Hans: Base64 编码的图片字符串
+          label:
+            en_US: Base64 encoded Text
+            ja_JP: Base64 encoded Text
+            pt_BR: Base64 encoded Text
+            zh_Hans: 已 Base64 编码的图片字符串
+          llm_description: Decode base64 image text to a file
+          max: null
+          min: null
+          name: encoded_text
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: Optional output filename
+            ja_JP: Optional output filename
+            pt_BR: Optional output filename
+            zh_Hans: 输出文件名，可选
+          label:
+            en_US: Filename of the output file
+            ja_JP: Filename of the output file
+            pt_BR: Filename of the output file
+            zh_Hans: 输出文件名
+          llm_description: ''
+          max: null
+          min: null
+          name: output_filename
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: "\n\n"
+          form: llm
+          human_description:
+            en_US: Delimiter for multiple base64 payloads
+            ja_JP: Delimiter for multiple base64 payloads
+            pt_BR: Delimiter for multiple base64 payloads
+            zh_Hans: 多段 Base64 的分隔符
+          label:
+            en_US: Delimiter
+            ja_JP: Delimiter
+            pt_BR: Delimiter
+            zh_Hans: 分隔符
+          llm_description: ''
+          max: null
+          min: null
+          name: splitter_str
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        params:
+          encoded_text: ''
+          output_filename: ''
+          splitter_str: ''
+        plugin_id: bowenliang123/base64_codec
+        plugin_unique_identifier: bowenliang123/base64_codec:1.0.1@034fdfa9602a2b207c0009adecb8998344dbb4f74a223c88680b477c83ee783b
+        provider_icon: /console/api/workspaces/current/plugin/icon?tenant_id=e807ab57-72b7-4603-8efb-9e7b03392600&filename=cebbda2083c25c484bb939ab05f656c605dfabd2f0ca9c42f767737052b4977a.png
+        provider_id: bowenliang123/base64_codec/base64_codec
+        provider_name: bowenliang123/base64_codec/base64_codec
+        provider_type: builtin
+        selected: false
+        title: Base64 ⮕ 图片文件
+        tool_configurations: {}
+        tool_description: 将 Base64 编码文本转为 图片文件
+        tool_label: Base64 ⮕ 图片文件
+        tool_name: base64_image_decoder
+        tool_node_version: '2'
+        tool_parameters:
+          encoded_text:
+            type: mixed
+            value: '{{#2100000000005.result#}}'
+          output_filename:
+            type: mixed
+            value: ''
+          splitter_str:
+            type: mixed
+            value: \n\n
+        type: tool
+      height: 52
+      id: '2100000000006'
+      position:
+        x: 1660
+        y: 220
+      positionAbsolute:
+        x: 1660
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        outputs:
+        - value_selector:
+          - '2100000000005'
+          - character_name
+          value_type: string
+          variable: character_name
+        - value_selector:
+          - '2100000000005'
+          - description
+          value_type: string
+          variable: description
+        - value_selector:
+          - '2100000000006'
+          - files
+          value_type: array[file]
+          variable: result
+        - value_selector:
+          - '2100000000005'
+          - markdown_output
+          value_type: string
+          variable: markdown_output
+        selected: false
+        title: 输出
+        type: end
+      height: 140
+      id: '2100000000007'
+      position:
+        x: 1980
+        y: 220
+      positionAbsolute:
+        x: 1980
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: 108
+      y: 170
+      zoom: 0.45
+  rag_pipeline_variables: []

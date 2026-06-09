@@ -37,6 +37,7 @@ import {
 import { FileUnavailableError, streamFile } from './fileStore.js';
 import { exportBatchToLark } from './lark.js';
 import { registerQualityRoutes } from './quality.js';
+import { registerCharacterRoutes } from './characterRoutes.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -65,6 +66,14 @@ app.get('/api/health', (_req, res) => {
       difyApiBase: process.env.DIFY_API_BASE ?? null,
       difyResponseMode: process.env.DIFY_RESPONSE_MODE ?? null,
       difyWorkflowName: process.env.DIFY_WORKFLOW_NAME ?? 'LL-段落高光生图-效果测试',
+      hasCharacterDifyApiKey: Boolean(process.env.CHARACTER_DIFY_API_KEY),
+      characterDifyApiBase: process.env.CHARACTER_DIFY_API_BASE ?? process.env.DIFY_API_BASE ?? null,
+      characterDifyResponseMode: process.env.CHARACTER_DIFY_RESPONSE_MODE ?? null,
+      characterDifyWorkflowName: process.env.CHARACTER_DIFY_WORKFLOW_NAME ?? null,
+      characterDifyAutoRetries: process.env.CHARACTER_DIFY_AUTO_RETRIES ?? null,
+      characterDifyRetryDelayMs: process.env.CHARACTER_DIFY_RETRY_DELAY_MS ?? null,
+      characterDifyTaskDelayMs: process.env.CHARACTER_DIFY_TASK_DELAY_MS ?? null,
+      characterDifyMaxTasksPerRun: process.env.CHARACTER_DIFY_MAX_TASKS_PER_RUN ?? null,
       hasQualityDifyApiKey: Boolean(process.env.QUALITY_DIFY_API_KEY ?? process.env.DIFY_QUALITY_API_KEY),
       qualityDifyApiBase: process.env.QUALITY_DIFY_API_BASE ?? process.env.DIFY_API_BASE ?? null,
       qualityDifyResponseMode: process.env.QUALITY_DIFY_RESPONSE_MODE ?? null
@@ -533,6 +542,9 @@ app.get(
 );
 
 registerQualityRoutes(app, {
+  getWorkbook: (workbookId) => workbooks.get(workbookId)
+});
+registerCharacterRoutes(app, {
   getWorkbook: (workbookId) => workbooks.get(workbookId)
 });
 
