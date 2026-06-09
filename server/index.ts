@@ -38,6 +38,7 @@ import { FileUnavailableError, streamFile } from './fileStore.js';
 import { exportBatchToLark } from './lark.js';
 import { registerQualityRoutes } from './quality.js';
 import { registerCharacterRoutes } from './characterRoutes.js';
+import { getDifyWorkflowConfigs } from './dify.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -59,6 +60,12 @@ app.use(cors({ origin: ['http://127.0.0.1:5173', 'http://localhost:5173'] }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
+  const difyWorkflows = getDifyWorkflowConfigs().map((workflow) => ({
+    id: workflow.id,
+    name: workflow.name,
+    configured: Boolean(workflow.apiKey),
+    responseMode: workflow.responseMode
+  }));
   res.json({
     ok: true,
     config: {
@@ -66,6 +73,7 @@ app.get('/api/health', (_req, res) => {
       difyApiBase: process.env.DIFY_API_BASE ?? null,
       difyResponseMode: process.env.DIFY_RESPONSE_MODE ?? null,
       difyWorkflowName: process.env.DIFY_WORKFLOW_NAME ?? 'LL-段落高光生图-效果测试',
+      difyWorkflows,
       hasCharacterDifyApiKey: Boolean(process.env.CHARACTER_DIFY_API_KEY),
       characterDifyApiBase: process.env.CHARACTER_DIFY_API_BASE ?? process.env.DIFY_API_BASE ?? null,
       characterDifyResponseMode: process.env.CHARACTER_DIFY_RESPONSE_MODE ?? null,

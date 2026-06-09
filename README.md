@@ -72,6 +72,11 @@ GET http://127.0.0.1:5175/api/health
 DIFY_API_BASE=http://dify.qmniu.com/v1
 DIFY_API_KEY=replace-with-your-dify-api-key
 DIFY_RESPONSE_MODE=streaming
+DIFY_WORKFLOW_NAME=线上工作流
+DIFY_COMPARE_API_BASE=http://dify.qmniu.com/v1
+DIFY_COMPARE_API_KEY=replace-with-your-compare-dify-api-key
+DIFY_COMPARE_RESPONSE_MODE=streaming
+DIFY_COMPARE_WORKFLOW_NAME=对照工作流
 QUALITY_DIFY_API_BASE=http://dify.qmniu.com/v1
 QUALITY_DIFY_API_KEY=replace-with-your-quality-workflow-api-key
 QUALITY_DIFY_RESPONSE_MODE=blocking
@@ -127,6 +132,7 @@ PORT=5175
 - `role`
 - `title`
 - `result_files`
+- `workflow_results`
 - `result_text`
 - `raw_outputs`
 - `error`
@@ -137,11 +143,18 @@ PORT=5175
 
 ## Dify 契约
 
-运行工作流：
+运行主工作流：
 
 ```text
 POST /workflows/run
 Authorization: Bearer ${DIFY_API_KEY}
+```
+
+如配置 `DIFY_COMPARE_API_KEY`，同一任务会并行运行对照工作流：
+
+```text
+POST /workflows/run
+Authorization: Bearer ${DIFY_COMPARE_API_KEY}
 ```
 
 请求体：
@@ -177,6 +190,8 @@ Authorization: Bearer ${DIFY_API_KEY}
 
 - 最终输出从 `data.outputs` 读取。
 - 图片优先从输出字段 `result` 解析，支持远程 URL、Dify 文件对象、base64 图片。
+- 双工作流结果保存到 `workflow_results`，每个元素包含 workflow 名称、状态、运行 ID、任务 ID、图片、文本、原始 outputs、错误与耗时。
+- 至少一个 workflow 成功时任务整体成功；两个 workflow 都失败时任务失败。失败侧会在右侧对比卡片中展示错误。
 - `is_valid` 从节点 `1778480914080` 或标题 `is_valid赋值` 的 `outputs.is_valid` 读取，保留原值。
 - `paragraph_description` 从节点 `1778480918522` 或标题 `生成段落描述` 的 `outputs.text` 读取。
 - 5xx、408、429、超时、服务繁忙等错误默认可重试。

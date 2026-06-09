@@ -43,6 +43,23 @@ export interface ResultFile {
   sourceKind: 'remote' | 'base64' | 'local';
 }
 
+export interface WorkflowResult {
+  workflow_id: string;
+  workflow_name: string;
+  status: 'running' | 'succeeded' | 'failed';
+  workflow_run_id?: string;
+  dify_task_id?: string;
+  elapsed_seconds?: number;
+  is_valid?: unknown;
+  paragraph_description?: string;
+  role?: string[];
+  title?: string;
+  result_files: ResultFile[];
+  result_text?: string;
+  raw_outputs?: unknown;
+  error?: string;
+}
+
 export interface BatchTask {
   id: string;
   batch_id?: string;
@@ -69,6 +86,7 @@ export interface BatchTask {
   role?: string[];
   title?: string;
   result_files: ResultFile[];
+  workflow_results?: WorkflowResult[];
   result_text?: string;
   raw_outputs?: unknown;
   error?: string;
@@ -121,6 +139,7 @@ export interface TaskRunRecord {
   dify_task_id?: string;
   is_valid?: unknown;
   result_files: ResultFile[];
+  workflow_results?: WorkflowResult[];
   result_text?: string;
   raw_outputs?: unknown;
   error?: string;
