@@ -10,7 +10,8 @@ import {
   listCharacterJobs,
   pauseCharacterJob,
   retryCharacterTask,
-  startCharacterJob
+  startCharacterJob,
+  updateCharacterJobPrompt
 } from './characters.js';
 import { closeStoreForTest } from './store.js';
 
@@ -176,6 +177,43 @@ describe('character jobs', () => {
     const scoped = getCharacterJob(job.id)!;
     expect(processedRows).toEqual([3]);
     expect(scoped.tasks.map((task) => task.status)).toEqual(['queued', 'succeeded']);
+  });
+
+  it('uses updated character prompt for subsequent task runs', async () => {
+    let receivedPrompt = '';
+    __setCharacterWorkflowControlsForTest(async (_task, promptText) => {
+      receivedPrompt = promptText;
+      return {
+        workflowRunId: 'prompt-run',
+        taskId: 'prompt-task',
+        outputs: {
+          character_image: 'https://cdn.example.com/prompt.png'
+        },
+        raw: {}
+      };
+    });
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '旧 Prompt'
+    );
+
+    const updated = updateCharacterJobPrompt(job.id, '新版重绘设定图 Prompt');
+    expect(updated.promptText).toBe('新版重绘设定图 Prompt');
+
+    (startCharacterJob as (jobId: string, taskIds?: string[]) => unknown)(job.id, [job.tasks[0].id]);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    expect(receivedPrompt).toBe('新版重绘设定图 Prompt');
   });
 
   it('does not drain unrelated queued tasks when retrying one character task', async () => {

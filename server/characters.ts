@@ -305,6 +305,18 @@ export function retryCharacterFailed(jobId: string) {
   return job;
 }
 
+export function updateCharacterJobPrompt(jobId: string, promptText: string) {
+  const job = getCharacterJob(jobId);
+  if (!job) throw new Error('角色任务不存在');
+  const nextPrompt = promptText.trim();
+  if (!nextPrompt) throw new Error('Prompt 不能为空');
+  if (!jobs.has(job.id)) jobs.set(job.id, job);
+  job.promptText = nextPrompt;
+  addEvent(job, 'info', '已更新角色立绘重绘 Prompt，后续执行将使用新版 Prompt');
+  emit(job);
+  return job;
+}
+
 export function pauseCharacterJob(jobId: string) {
   const job = getCharacterJob(jobId);
   if (!job) throw new Error('角色任务不存在');

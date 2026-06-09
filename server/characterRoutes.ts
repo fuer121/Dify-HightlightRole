@@ -9,7 +9,8 @@ import {
   retryCharacterFailed,
   retryCharacterTask,
   startCharacterJob,
-  subscribeCharacterJob
+  subscribeCharacterJob,
+  updateCharacterJobPrompt
 } from './characters.js';
 
 interface RegisterCharacterRouteOptions {
@@ -58,6 +59,16 @@ export function registerCharacterRoutes(app: express.Express, options: RegisterC
       res.status(404).json({ error: '角色任务不存在' });
       return;
     }
+    res.json(job);
+  });
+
+  app.patch('/api/character-jobs/:id/prompt', (req, res) => {
+    const { promptText } = req.body as { promptText?: unknown };
+    if (typeof promptText !== 'string' || !promptText.trim()) {
+      res.status(400).json({ error: 'Prompt 不能为空' });
+      return;
+    }
+    const job = updateCharacterJobPrompt(req.params.id, promptText);
     res.json(job);
   });
 

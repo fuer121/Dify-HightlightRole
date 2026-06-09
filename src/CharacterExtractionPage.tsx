@@ -143,12 +143,13 @@ const CHARACTER_REQUIRED_FIELDS: Array<{ key: keyof CharacterColumnMapping; labe
   { key: 'role_name', label: '角色名' }
 ];
 
-const DEFAULT_CHARACTER_PROMPT = `请根据输入的段落图片识别主要人物，并输出纯白色背景的人物立绘。要求：
-1. 只保留主要人物，不要背景，不要道具外景，不要多人群像。
-2. 立绘必须是纯白色背景，人物完整、居中、边缘清晰。
-3. 如果图片中有多个人物，只保留画面中的主要人物。
-4. 如果给定角色名，请优先以该角色为主体。
-5. 输出中请返回人物名称、人物外观描述、立绘图片。`;
+const DEFAULT_CHARACTER_PROMPT = `请把段落图片作为角色参考图，而不是抠图素材，基于图中主要人物重新绘制一张可作为人物设定图使用的白底立绘。要求：
+1. 保留原图人物的核心可识别特征：性别年龄感、发型、五官气质、服饰结构、重要配饰和角色状态。
+2. 不要直接裁切、抠出或复刻原图人物；需要重新绘制成干净的角色设定立绘。
+3. 立绘为单人、纯白背景、全身或大半身完整构图，正面或三分之二侧面，人物居中，边缘清晰。
+4. 去掉原场景背景、复杂光影、剧情动作、水面/山谷/建筑等环境元素，只保留角色设计本身。
+5. 如果图片中有多个人物，请以给定角色名或画面主角为主体，避免多人群像。
+6. 输出人物名称、用于重绘的外观设定描述，以及最终立绘图片。`;
 
 const statusLabel: Record<TaskStatus, string> = {
   queued: '排队中',
@@ -218,6 +219,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
   const [selectedSheetName, setSelectedSheetName] = useState('');
   const [mapping, setMapping] = useState<Partial<CharacterColumnMapping>>({});
   const [promptText, setPromptText] = useState(DEFAULT_CHARACTER_PROMPT);
+  const [jobPromptDraft, setJobPromptDraft] = useState(DEFAULT_CHARACTER_PROMPT);
   const [jobs, setJobs] = useState<CharacterJobSummary[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [job, setJob] = useState<CharacterJob | null>(null);
@@ -234,6 +236,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
   const [isCreating, setCreating] = useState(false);
   const [isStarting, setStarting] = useState(false);
   const [isPausing, setPausing] = useState(false);
+  const [isSavingPrompt, setSavingPrompt] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -307,9 +310,11 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
     if (nextSelectedId) {
       const detail = await fetch(`/api/character-jobs/${nextSelectedId}`).then((response) => readJson<CharacterJob>(response));
       setJob(detail);
+      setJobPromptDraft(detail.promptText || DEFAULT_CHARACTER_PROMPT);
       setSelectedTaskId((current) => current ?? detail.tasks[0]?.id ?? null);
     } else {
       setJob(null);
+      setJobPromptDraft(DEFAULT_CHARACTER_PROMPT);
       setSelectedTaskId(null);
     }
   }, [selectedJobId]);
@@ -398,6 +403,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
       }).then((response) => readJson<CharacterJob>(response));
       setSelectedJobId(nextJob.id);
       setJob(nextJob);
+      setJobPromptDraft(nextJob.promptText || DEFAULT_CHARACTER_PROMPT);
       setSelectedTaskId(nextJob.tasks[0]?.id ?? null);
       await refreshJobs(nextJob.id);
     } catch (createError) {
@@ -416,17 +422,46 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
     setError(null);
     setStarting(true);
     try {
+      const activeJob = await saveJobPromptIfNeeded();
       const nextJob = await fetch(`/api/character-jobs/${job.id}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskIds })
       }).then((response) => readJson<CharacterJob>(response));
-      setJob(nextJob);
+      setJob({ ...nextJob, promptText: nextJob.promptText || activeJob.promptText });
       setSelectedTaskId(nextSelectedTaskId ?? taskIds[0] ?? nextJob.tasks[0]?.id ?? null);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : '启动角色任务失败');
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function saveJobPromptIfNeeded() {
+    if (!job) throw new Error('角色任务不存在');
+    const nextPrompt = jobPromptDraft.trim();
+    if (!nextPrompt) throw new Error('Prompt 不能为空');
+    if (nextPrompt === job.promptText.trim()) return job;
+    const nextJob = await fetch(`/api/character-jobs/${job.id}/prompt`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptText: nextPrompt })
+    }).then((response) => readJson<CharacterJob>(response));
+    setJob(nextJob);
+    setJobPromptDraft(nextJob.promptText || nextPrompt);
+    return nextJob;
+  }
+
+  async function saveJobPrompt() {
+    if (!job) return;
+    setError(null);
+    setSavingPrompt(true);
+    try {
+      await saveJobPromptIfNeeded();
+    } catch (promptError) {
+      setError(promptError instanceof Error ? promptError.message : '保存 Prompt 失败');
+    } finally {
+      setSavingPrompt(false);
     }
   }
 
@@ -591,6 +626,23 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
                 <span>总计 {job.tasks.length} 条</span>
                 <span>当前筛选命中 {filteredTasks.length} 条</span>
               </div>
+              <label className="field-label character-job-prompt">
+                当前任务 Prompt
+                <textarea
+                  className="character-prompt-input"
+                  value={jobPromptDraft}
+                  onChange={(event) => setJobPromptDraft(event.target.value)}
+                  rows={7}
+                />
+              </label>
+              <button
+                className="secondary-action"
+                onClick={() => void saveJobPrompt()}
+                disabled={isSavingPrompt || !jobPromptDraft.trim() || jobPromptDraft.trim() === job.promptText.trim()}
+              >
+                {isSavingPrompt ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+                保存当前 Prompt
+              </button>
               <button
                 className="wide-button character-execution-button"
                 onClick={() => void startJob()}
@@ -807,7 +859,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
             <div className="empty-state">
               <UserRound size={40} />
               <h2>从角色形象提取开始</h2>
-              <p>上传包含段落图片链接的 Excel，提取主要人物并生成白底立绘。</p>
+              <p>上传包含段落图片链接的 Excel，参考主要人物重绘白底设定立绘。</p>
             </div>
           )}
         </section>

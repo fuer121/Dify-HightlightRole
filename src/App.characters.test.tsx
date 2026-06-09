@@ -25,6 +25,12 @@ function changeInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function changeTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+  valueSetter?.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function changeCheckboxValue(input: HTMLInputElement, checked: boolean) {
   if (input.checked !== checked) input.click();
 }
@@ -132,6 +138,7 @@ describe('App characters page routing', () => {
 
   it('filters character task rows by included role', async () => {
     let startRequestBody: string | null = null;
+    let promptPatchBody: string | null = null;
     characterJobs = [
       {
         id: 'job-filter',
@@ -163,6 +170,22 @@ describe('App characters page routing', () => {
           sheetName: '执行结果7',
           mapping: {},
           promptText: 'prompt',
+          status: 'completed',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-jobs/job-filter/prompt')) {
+        promptPatchBody = typeof init?.body === 'string' ? init.body : null;
+        return jsonResponse({
+          id: 'job-filter',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: JSON.parse(promptPatchBody ?? '{}').promptText,
           status: 'completed',
           createdAt: '2026-06-09T00:00:00.000Z',
           updatedAt: '2026-06-09T00:00:00.000Z',
@@ -237,11 +260,18 @@ describe('App characters page routing', () => {
     expect(container.textContent).toContain('云筝');
     expect(container.textContent).not.toContain('容烁出现');
 
+    const promptTextarea = container.querySelector('textarea')!;
+    await act(async () => {
+      changeTextareaValue(promptTextarea, '新版角色设定图重绘 Prompt');
+    });
+    await flushUi();
+
     const startButton = Array.from(container.querySelectorAll('button')).find((item) => item.textContent?.includes('执行提取'))!;
     await act(async () => {
       startButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
+    expect(JSON.parse(promptPatchBody ?? '{}')).toEqual({ promptText: '新版角色设定图重绘 Prompt' });
     expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz'] });
   });
 
