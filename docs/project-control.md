@@ -13,11 +13,11 @@
 
 ## 当前状态
 
-- Git 基线：`de0ad9c Merge pull request #9 from fuer121/codex/add-newtab`
-- 当前分支：`codex/Prompt-upgrade`
-- 工作区状态：角色 Prompt 目标从“提取”调整为“参考原图重绘设定立绘”，已通过回归验证，待提交决策
-- 已验证项：`npm test` 通过，`npm run build` 通过，`npm run lint` 通过，稳定访问地址 `http://172.16.79.76:5173/?page=characters` 返回 200
-- 当前未提交优化主题：
+- Git 基线：`7e657e3 Merge pull request #10 from fuer121/codex/Prompt-upgrade`
+- 当前分支：`codex/change-dify-flow`
+- 工作区状态：书籍库生图链路已扩展为双工作流执行与右侧对比展示；主 workflow 继续使用 `DIFY_API_KEY`，对照 workflow 新增 `DIFY_COMPARE_API_KEY`；本机 `.env.local` 已配置真实对照 key；书籍库任务列表与右侧详情模块已支持拖拽调宽；提交范围只包含占位样例。
+- 已验证项：`npm test` 通过 10 个测试文件 77 个用例，`npm run build` 通过，`npm run lint` 通过；重启后端后 `/api/health` 返回 `difyWorkflows=[线上工作流, 对照工作流]` 且两者 `configured=true`；前端稳定地址 `http://172.16.79.76:5173/?page=books` 返回 200。
+- PR #10 已合并功能主题：
   - 继续执行支持按筛选范围重跑已成功任务，并把真实执行 scope 写入批次日志
   - 书籍任务历史新增运行记录图片预览与双记录对比
   - 质量判断记录分页边界修正
@@ -30,11 +30,15 @@
   - 角色立绘生成结果缓存到本地，避免 Dify 临时图片 URL 过期后预览不可读
   - 角色立绘 Prompt 升级为“重绘设定图”语义，并支持更新当前历史任务 Prompt
   - 角色队列取消默认小样本上限，后续批量执行数量由筛选/勾选范围决定
+- 真实运行快照（2026-06-09 18:08:51 CST）：角色 job `wRMQnhciToy_-bP5D7GXl` 仍为 `running`，文件 `首批700张生图.xlsx`，计数为 `43 succeeded / 1 running / 656 queued / 0 failed`。
+- Prompt/效果核查：当前 job 持久化 `promptText` 为 `测试 prompt`；最近成功任务的 `raw_outputs.description` 已包含“参考原图人物特征重绘、纯白背景、全身立绘、不要原场景”等语义，抽样 `/api/files/caVX41cbKmKIJVsz1JosD` 返回 200 且本地缓存可读。
+- 新发现风险：多角色 `角色名` 字段（如 `钟离无渊,燕沉`）可能生成双人白底立绘，即使描述里包含“单人”。这不是“抠图”证据，但属于后续需要确认的多角色输入策略。
 
 ## 本轮目标
 
-- 补齐项目治理真实信源，避免代码、任务、线程、文档和 Git 状态继续脱节
-- 给当前未提交优化建立清晰边界，决定哪些任务串行、哪些验证后才能提交
+- 在书籍库生图链路上实现同一任务并行调用主工作流和对照工作流。
+- 将两个 workflow 的图片、状态、错误、耗时和名称持久化，并在右侧任务详情/执行记录中对比展示。
+- 保持旧单工作流历史记录可读，保持当前列表筛选/勾选执行范围语义不变。
 
 ## 任务看板
 
@@ -61,6 +65,11 @@
 | IMPL-CHAR-07 | 支持角色任务单条执行、批量选择执行与整体暂停 | 已验证 | 实现型 Agent | 当前角色任务列表、`/api/character-jobs/:id/start`、运行队列状态 | `server/characters.ts`、`server/characterRoutes.ts`、`src/CharacterExtractionPage.tsx`、相关测试 | 单条详情可只发起该行；勾选多行后 `/start` 只提交已选 `taskIds`；整体暂停会把 queued 任务置为 paused，当前 running 行完成后不再取下一行；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 | IMPL-CHAR-08 | 修复角色立绘生成成功但预览图片不可读 | 已验证 | 排查型 Agent -> 实现型 Agent | 真实任务 `wRMQnhciToy_-bP5D7GXl`、`portrait_files_json`、`/api/files/:id` | `server/characterDify.ts`、`server/fileStore.ts`、`server/characterDify.test.ts`、`server/characters.test.ts`、历史数据修复 | 新生成立绘在结果标准化时尽量落本地缓存；Dify 返回错误 MIME 时按图片字节识别真实类型；历史成功行可从 `markdown_output` base64 回填本地文件；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 | IMPL-CHAR-09 | 将角色立绘 Prompt 从“提取人物”升级为“重绘设定图” | 已验证 | 实现型 Agent | 用户反馈：当前立绘像从原图抠出人物，不符合设定图目标 | `src/CharacterExtractionPage.tsx`、`Dify-DSL/LL-角色形象提取-白底立绘.yml`、`server/characters.ts`、`server/characterRoutes.ts`、相关测试 | 新建任务默认 Prompt 明确“参考原图重绘，非抠图/裁切/复刻原场景”；历史 job 可更新当前 Prompt；执行前未保存 Prompt 会自动保存；Dify DSL 可解析；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| CHAR-HANDOFF-01 | 接手后核查 PR #10、稳定服务与真实角色 job 状态 | 已完成 | 接手子线程 Agent | `main` 最新代码、`/api/health`、`/api/character-jobs`、真实 job 详情 | 本文档、运行态快照、样图核查结论 | 确认 PR #10 已合并；服务进程命中当前仓库；真实 job 计数、Prompt、最近成功 outputs 与图片缓存可查 | 是 | 文档同步，不纳入本地产物 |
+| IMPL-BOOK-DUAL-01 | 书籍库生图扩展双工作流执行与右侧对比展示 | 已验证 | 实现型 Agent | 线上 workflow key 与对照 workflow key 已配置于本机 `.env.local`、现有书籍库队列和 run 记录 | `server/dify.ts`、`server/queue.ts`、`server/store.ts`、`server/types.ts`、`server/index.ts`、`src/App.tsx`、`src/styles.css`、测试与文档 | 同一任务并行调用已配置 workflow；至少一侧成功则任务成功，两侧失败才失败；`workflow_results_json` 保存两侧结果；旧 run 自动合成单主工作流结果；右侧详情与执行记录展示 workflow 名称/图片/错误；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| IMPL-UI-01 | 侧边栏抽屉支持手动收起和展开 | 已验证 | 实现型 Agent | 用户浏览器批注、`WorkspaceSidebar`、书籍库/质量判断/角色三页容器 | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 顶层侧栏按钮可在展开/收起间切换；收起时保留图标导航并隐藏书籍列表/说明/工作流信息；三页共享状态；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
+| IMPL-UI-02 | 双工作流结果卡并排展示并隐藏调试字段 | 已验证 | 实现型 Agent | 用户浏览器批注、右侧任务详情 workflow cards | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 主/对照 workflow 在任务详情中优先并排展示；隐藏 `workflow_run_id/dify_task_id` 对应的“运行/任务”字段；保留 workflow 名称、状态、图片/生成中、标题、描述和错误；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
+| IMPL-UI-03 | 书籍库任务列表与详情模块支持拖拽调宽 | 已验证 | 实现型 Agent | 用户浏览器批注、书籍库中栏任务列表与右侧任务详情 | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 中栏与右栏之间提供拖拽分隔条；拖拽后右侧详情宽度持久化；窄屏自动回退单列布局；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 
 ## 线程索引
 
@@ -78,7 +87,7 @@
 | IMPL-RUN-ISVALID | 修复 run 级 `is_valid` 缺失与展示不稳 | 实现线程 | 实现型 Agent | `BUG-ISVALID-01` 证据链、`server/store.ts`、`src/App.tsx` | 明确 run 级存储/读取策略，并有测试覆盖 | 待启动 |
 | IMPL-RUN-COMPARE | 收口运行记录对比 UI | 实现线程 | 实现型 Agent | `src/App.tsx`、`src/styles.css`、执行记录数据结构 | 对比交互与样式稳定，准备交 QA | 建议在 IMPL-BOOK-RERUN 之后启动 |
 | QA-BOOK-QUALITY | 独立验证本轮优化闭环 | 验证线程 | 验证型 Agent | 冻结后的代码、测试命令、手工验证路径 | 输出通过/失败结论、风险、回归建议 | 待启动 |
-| CHAR-DIFY-TRACE | 排查角色 Dify 真实调用与队列恢复 | 排查线程 | 排查型 Agent | `AE6uKzan5i1zsbpyQD4k3`、`app-pXvrR01xoLRtxL44wMkbDrPY`、`LL-角色形象提取-白底立绘` | 明确失败层级并保护队列状态 | 已完成；队列保护性暂停，等待是否继续重试 |
+| CHAR-DIFY-TRACE | 排查角色 Dify 真实调用与队列恢复 | 排查线程 | 排查型 Agent | `AE6uKzan5i1zsbpyQD4k3`、角色 Dify key 已配置于本机 `.env.local`、`LL-角色形象提取-白底立绘` | 明确失败层级并保护队列状态 | 已完成；队列保护性暂停，等待是否继续重试 |
 | IMPL-CHAR-LIST-FILTER | 优化角色任务列表筛选与左侧任务展示 | 实现线程 | 实现型 Agent | 用户浏览器批注、`src/CharacterExtractionPage.tsx`、`src/styles.css` | 角色列表筛选可用且自动化验证通过 | 已完成 |
 | IMPL-CHAR-SCOPED-START | 角色执行按钮绑定筛选范围 | 实现线程 | 实现型 Agent | 当前筛选任务列表、角色 start API | 前端/后端执行范围一致并有测试覆盖 | 已完成 |
 | IMPL-CHAR-EXCLUDE-MULTISELECT | 排除角色候选多选 | 实现线程 | 实现型 Agent | 当前任务列表角色字段、筛选/执行范围逻辑 | 排除角色候选下拉多选可用，且执行范围同步 | 已完成 |
@@ -86,6 +95,10 @@
 | IMPL-CHAR-TASK-CONTROL | 角色任务单条/批量/暂停控制 | 实现线程 | 实现型 Agent | 当前角色任务列表、`taskIds` 执行范围、角色队列运行状态 | 三类控制入口可用且不会误跑未选择队列 | 已完成 |
 | BUG-CHAR-FILE-CACHE | 排查角色立绘预览图片不可读 | 排查线程 | 排查型 Agent | 真实成功行、`portrait_files_json`、Dify file URL、`/api/files/:id` | 区分生成失败、临时 URL 过期、MIME 错误或本地缓存缺失，并完成最小修复 | 已完成 |
 | IMPL-CHAR-PROMPT-REDRAW | 角色立绘 Prompt 升级为设定图重绘 | 实现线程 | 实现型 Agent | 当前角色 Dify workflow、前端默认 Prompt、历史 job promptText | 新建与历史任务都能使用新版重绘 Prompt | 已完成 |
+| IMPL-BOOK-DUAL-WORKFLOW | 书籍库双工作流执行与对比展示 | 实现线程 | 实现型 Agent | `server/dify.ts`、`server/queue.ts`、`server/store.ts`、`src/App.tsx`、两个 Dify API key | 自动化验证通过，文档同步，提交边界明确 | 已完成 |
+| IMPL-SIDEBAR-COLLAPSE | 侧边栏抽屉手动收起/展开 | 实现线程 | 实现型 Agent | 用户浏览器批注、`WorkspaceSidebar` | 手动切换可用，自动化测试覆盖 | 已完成 |
+| IMPL-WORKFLOW-CARD-COMPARE | 双工作流结果卡展示优化 | 实现线程 | 实现型 Agent | 用户浏览器批注、`WorkflowResultCards` | 右侧详情按双列对比展示，隐藏调试 ID | 已完成 |
+| IMPL-BOOK-PANEL-RESIZE | 书籍库中栏/右栏拖拽调宽 | 实现线程 | 实现型 Agent | 用户浏览器批注、`book-main-grid`、右侧任务详情宽度 | 拖拽分隔条可调整并持久化详情宽度，窄屏不破版 | 已完成 |
 
 ## 决策记录
 
@@ -138,15 +151,27 @@
 24. 现有历史 job 默认不会自动吃到前端新默认 Prompt，因为 `promptText` 已在创建 job 时持久化。因此新增当前任务 Prompt 编辑与保存能力，并在执行前自动保存未提交 Prompt 草稿。
 25. 本地 `Dify-DSL/LL-角色形象提取-白底立绘.yml` 已同步新版重绘语义，但 Dify 平台真实 workflow 不会因本地文件变化自动更新；如需平台系统节点也生效，必须重新导入该 DSL 或在 Dify 控制台手动同步对应节点。
 26. 角色队列默认小样本上限已取消：`.env.local` 和 `.env.example` 不再设置 `CHARACTER_DIFY_MAX_TASKS_PER_RUN`，后续批量执行会按当前筛选/勾选范围持续执行到范围完成、手动暂停或外部失败。若需要临时灰度，可手动设置该环境变量。
+27. PR #10 已合并到 `main`，接手分支从最新 `main` 切出；未跟踪本地产物 `.playwright-cli/`、`测试文本/` 继续保持不纳入 Git。
+28. 2026-06-09 18:08:51 CST 重新查询 `/api/character-jobs`：`wRMQnhciToy_-bP5D7GXl` 为 `running`，计数 `43 succeeded / 1 running / 656 queued / 0 failed`，不能继续沿用接手消息里的旧数字。
+29. 当前 5175 后端进程 PID `27461` 的 cwd 为本仓库，并通过 `tsx` 启动 `server/index.ts`；可认为稳定服务正在运行同一份当前代码。
+30. 当前 job 的 `promptText` 是 `测试 prompt`，不是完整版默认重绘 Prompt；但最近成功任务的 Dify outputs 已包含重绘白底立绘语义，说明平台 workflow 输出层当前不像旧“抠图/提取原图人物”链路。
+31. 抽样样图 `caVX41cbKmKIJVsz1JosD` 为 768x1024 白底重绘立绘且 `/api/files` 返回 200；但因原 `角色名` 为 `钟离无渊,燕沉`，结果为双人立绘。后续若严格要求“每张只出现一个角色”，应先决定是拆分多角色行、选择主角色，还是允许多角色字段生成多人设定图。
+32. 书籍库双工作流采用“部分成功”策略：主/对照任一 workflow 成功则任务整体 `succeeded`，失败侧错误写入 `workflow_results_json` 并在对比卡片中展示；两个 workflow 都失败时任务才 `failed`。
+33. 双工作流执行采用并行调用，不改变书籍库当前筛选/勾选执行范围语义；本轮只扩展单个任务内部的 Dify 调用与结果展示。
+34. 存储兼容策略：`tasks` 和 `task_runs` 新增 `workflow_results_json`；旧记录没有该字段时由现有 `result_files/result_text/workflow_run_id/dify_task_id/error` 合成一个主工作流结果。
+35. `.env.example` 只允许提交对照 workflow 的占位 key；真实 `DIFY_COMPARE_API_KEY` 仅写入 ignored 的本机 `.env.local`。
+36. 侧边栏折叠状态放在顶层 `App`，书籍库、质量判断、角色形象提取三页共享；折叠只影响导航展示和布局宽度，不改变当前书籍/任务/筛选/执行状态。
+37. 右侧双工作流结果卡的用户视图不展示 `workflow_run_id` 和 `dify_task_id`；这些字段保留在持久化数据中用于排查，但默认 UI 只展示 workflow 名称、状态、返图/生成中、标题、描述和错误。
+38. 书籍库任务列表与右侧任务详情之间新增拖拽分隔条；右侧宽度写入浏览器本地存储，刷新后保留；窄屏下隐藏分隔条并强制单列布局。
 
 ## Git 记录
 
-- HEAD：`de0ad9c Merge pull request #9 from fuer121/codex/add-newtab`
-- 当前分支：`codex/Prompt-upgrade`
+- HEAD：`7e657e3 Merge pull request #10 from fuer121/codex/Prompt-upgrade`
+- 当前分支：`codex/change-dify-flow`
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：角色任务控制、角色立绘文件本地缓存修复、角色重绘 Prompt 升级与主文档同步。
+- 本轮提交范围：书籍库双工作流配置、执行聚合、存储兼容、右侧对比展示、侧边栏折叠、任务详情拖拽调宽、测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -170,6 +195,10 @@
 | R-15 | 角色立绘远端签名 URL 会过期 | 中 | 成功任务稍后回看可能显示“图片暂不可读” | 新结果会尽量立即缓存到本地；已从历史 `markdown_output` base64 回填可修复的成功行。若远端 URL 已过期且历史 raw 中无 base64，则无法无损回填，只能重跑该行 |
 | R-16 | 本地 DSL 修改不会自动更新 Dify 平台 workflow | 中 | 只改仓库文件时，平台系统 Prompt 仍可能沿用旧“提取人物”语义 | 前端和当前 job Prompt 已可生效；平台侧如需彻底一致，需要重新导入 DSL 或手动同步 Dify 节点 |
 | R-17 | 取消默认小样本上限后，大批量执行会长时间占用队列并持续调用 Dify | 中 | 极大批量任务如果筛选范围过大，会持续运行直到完成或手动暂停 | 默认按用户选择范围执行；页面已有暂停整体任务入口；建议大批量前确认筛选命中数和 Prompt 已保存 |
+| R-18 | 当前运行 job 的 `promptText` 是 `测试 prompt` | 中 | 继续跑完 700 条会把测试文本叠加进部分描述，可能影响一致性 | 已记录事实；是否暂停并保存正式 Prompt 属于 Prompt 策略变化，需用户确认后再执行 |
+| R-19 | 多角色 `角色名` 字段可能生成多人立绘 | 中 | 若目标是“一张图只出一个角色”，多角色行会产生不符合预期的双人或多人结果 | 已通过样图确认；后续应先确认拆分/主角色/允许多人三选一策略，再改执行逻辑 |
+| R-20 | 双 workflow 并行调用会把单任务 Dify 请求量翻倍 | 中 | 大批量书籍任务会同时消耗两个 workflow 的额度与上游并发能力 | 当前按用户要求并行执行；如出现限流，再切为可配置串行或工作流级限速 |
+| R-21 | 对照 workflow 输出字段若不符合既有图片字段契约 | 中 | 对照侧可能显示失败卡，但主侧成功仍会让任务继续 | 已支持 `result/result_files/files/file/image/images/image_url/image_urls/url`；失败侧保留 `raw_outputs/error` 便于追踪 |
 
 ## QA-01 验收脚本
 

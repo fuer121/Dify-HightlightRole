@@ -49,6 +49,10 @@ button {
   min-height: 100vh;
 }
 
+.workspace-frame.sidebar-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
 .workspace-sidebar {
   align-self: stretch;
   background: #111827;
@@ -63,6 +67,13 @@ button {
   position: sticky;
   top: 0;
   z-index: 8;
+}
+
+.workspace-sidebar.collapsed {
+  align-items: center;
+  gap: 14px;
+  overflow: visible;
+  padding: 14px 10px;
 }
 
 .sidebar-workflow-info {
@@ -93,8 +104,14 @@ button {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 42px minmax(0, 1fr) 34px;
   min-height: 52px;
+}
+
+.workspace-sidebar.collapsed .sidebar-brand {
+  gap: 8px;
+  grid-template-columns: 42px;
+  justify-items: center;
 }
 
 .brand-mark {
@@ -108,6 +125,28 @@ button {
   height: 42px;
   justify-content: center;
   width: 42px;
+}
+
+.sidebar-collapse-button {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #dbe7f6;
+  cursor: pointer;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.sidebar-collapse-button:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.workspace-sidebar.collapsed .sidebar-collapse-button {
+  margin-top: 4px;
 }
 
 .sidebar-brand strong {
@@ -128,6 +167,10 @@ button {
 .sidebar-nav {
   display: grid;
   gap: 6px;
+}
+
+.workspace-sidebar.collapsed .sidebar-nav {
+  width: 100%;
 }
 
 .sidebar-nav-group {
@@ -152,6 +195,16 @@ button {
     color 160ms ease,
     transform 160ms ease;
   width: 100%;
+}
+
+.workspace-sidebar.collapsed .sidebar-nav button {
+  justify-content: center;
+  padding: 0;
+}
+
+.workspace-sidebar.collapsed .sidebar-brand-copy,
+.workspace-sidebar.collapsed .sidebar-nav button span {
+  display: none;
 }
 
 .sidebar-nav button {
@@ -1521,6 +1574,43 @@ select {
   overflow: hidden;
 }
 
+.book-panel-resizer {
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  cursor: col-resize;
+  min-height: 100%;
+  padding: 0;
+  position: relative;
+}
+
+.book-panel-resizer::after {
+  background: #dce3ee;
+  border-radius: 999px;
+  bottom: 12px;
+  content: '';
+  left: 50%;
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  transition:
+    background 160ms ease,
+    width 160ms ease;
+  width: 2px;
+}
+
+.book-panel-resizer:hover::after,
+.book-panel-resizer:focus-visible::after,
+.book-panel-resizer:active::after {
+  background: #2f74ff;
+  width: 4px;
+}
+
+.book-panel-resizer:focus-visible {
+  outline: 2px solid rgba(47, 116, 255, 0.35);
+  outline-offset: 2px;
+}
+
 .batch-create-panel {
   background: #ffffff;
   border-bottom: 1px solid #e3e7ef;
@@ -2572,6 +2662,100 @@ select {
   width: 100%;
 }
 
+.workflow-result-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.workflow-result-card {
+  background: #ffffff;
+  border: 1px solid #dce2ec;
+  border-left: 4px solid #138a46;
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.workflow-result-card.failed {
+  border-left-color: #c9352b;
+}
+
+.workflow-result-card.running {
+  border-left-color: #2f74ff;
+}
+
+.workflow-result-card header {
+  align-items: start;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.workflow-result-card header div {
+  display: grid;
+  gap: 2px;
+}
+
+.workflow-result-card strong,
+.workflow-result-card h3 {
+  color: #263247;
+  font-size: 13px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.workflow-result-card header span,
+.workflow-result-card small {
+  color: #657084;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflow-image-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-image-list img {
+  aspect-ratio: 3 / 4;
+  background: #f1f4f8;
+  display: block;
+  height: min(32vh, 360px);
+  object-fit: contain;
+  width: 100%;
+}
+
+.workflow-result-card p {
+  color: #3b4658;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.workflow-run-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.workflow-run-chip {
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-run-chip.failed > span {
+  color: #c9352b;
+}
+
+.workflow-run-chip.running > span {
+  color: #2f74ff;
+}
+
 .lightbox {
   align-items: center;
   background: rgba(15, 23, 42, 0.72);
@@ -3180,6 +3364,14 @@ select {
     overflow: visible;
   }
 
+  .book-main-grid[style] {
+    grid-template-columns: 1fr !important;
+  }
+
+  .book-panel-resizer {
+    display: none;
+  }
+
   .book-main-grid .books-main,
   .book-main-grid .books-detail {
     max-height: none;
@@ -3286,11 +3478,20 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .workspace-frame.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-sidebar {
     border-right: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     max-height: none;
     position: static;
+  }
+
+  .workspace-sidebar.collapsed {
+    align-items: stretch;
+    overflow: auto;
   }
 
   .workspace-content {

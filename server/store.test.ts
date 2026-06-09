@@ -30,6 +30,22 @@ describe('store task run is_valid persistence', () => {
   it('records run-level is_valid separately from raw_outputs', () => {
     const task = makeTask({
       is_valid: 1,
+      workflow_results: [
+        {
+          workflow_id: 'primary',
+          workflow_name: '线上工作流',
+          status: 'succeeded',
+          workflow_run_id: 'workflow-primary',
+          result_files: []
+        },
+        {
+          workflow_id: 'compare',
+          workflow_name: '对照工作流',
+          status: 'failed',
+          result_files: [],
+          error: '对照失败'
+        }
+      ],
       raw_outputs: { title: '只有标题，没有 is_valid' }
     });
 
@@ -40,6 +56,7 @@ describe('store task run is_valid persistence', () => {
 
     expect(runs).toHaveLength(1);
     expect(runs[0].is_valid).toBe(1);
+    expect(runs[0].workflow_results?.map((result) => result.workflow_name)).toEqual(['线上工作流', '对照工作流']);
     expect(runs[0].raw_outputs).toEqual({ title: '只有标题，没有 is_valid' });
   });
 
@@ -129,5 +146,10 @@ describe('store task run is_valid persistence', () => {
 
     expect(run.is_valid).toBeUndefined();
     expect(run.raw_outputs).toEqual({ title: '历史记录没有 is_valid' });
+    expect(run.workflow_results?.[0]).toMatchObject({
+      workflow_id: 'primary',
+      workflow_run_id: 'workflow-history',
+      status: 'succeeded'
+    });
   });
 });

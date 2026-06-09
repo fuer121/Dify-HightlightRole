@@ -91,6 +91,42 @@ describe('queue', () => {
     expect(batch.tasks[0].pause_reason).toBe('task');
   });
 
+  it('stops every known workflow task id when pausing a running dual-workflow task', async () => {
+    const stopped: Array<{ taskId: string; workflowId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId) => {
+      stopped.push({ taskId, workflowId });
+      return {};
+    });
+    const batch = makeBatch();
+    const task = batch.tasks[0];
+    task.status = 'running';
+    task.dify_task_id = 'primary-task';
+    task.workflow_results = [
+      {
+        workflow_id: 'primary',
+        workflow_name: '线上工作流',
+        status: 'running',
+        dify_task_id: 'primary-task',
+        result_files: []
+      },
+      {
+        workflow_id: 'compare',
+        workflow_name: '对照工作流',
+        status: 'running',
+        dify_task_id: 'compare-task',
+        result_files: []
+      }
+    ];
+
+    await pauseTask(batch.id, task.id);
+
+    expect(stopped).toEqual([
+      { taskId: 'primary-task', workflowId: 'primary' },
+      { taskId: 'compare-task', workflowId: 'compare' }
+    ]);
+    expect(task.stop_requested_at).toBeTruthy();
+  });
+
   it('retries a paused task by queueing it from scratch', async () => {
     __setWorkflowControlsForTest(async () => ({
       workflowRunId: 'run-1',
@@ -246,6 +282,67 @@ describe('queue', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0].workflow_run_id).toBe('run-recorded');
     expect(runs[0].status).toBe('succeeded');
+  });
+
+  it('marks a dual-workflow task succeeded when one workflow fails but another succeeds', async () => {
+    __setWorkflowControlsForTest(async () => [
+      {
+        workflow_id: 'primary',
+        workflow_name: '线上工作流',
+        status: 'succeeded',
+        workflow_run_id: 'primary-run',
+        dify_task_id: 'primary-task',
+        result_files: [],
+        title: '主流程标题',
+        raw_outputs: { title: '主流程标题' }
+      },
+      {
+        workflow_id: 'compare',
+        workflow_name: '对照工作流',
+        status: 'failed',
+        result_files: [],
+        error: '对照工作流超时'
+      }
+    ]);
+    const batch = makeBatch();
+    startSelectedTasks(batch.id, [batch.tasks[0].id]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const runs = getTaskRuns(batch.tasks[0].id);
+
+    expect(batch.tasks[0].status).toBe('succeeded');
+    expect(batch.tasks[0].workflow_run_id).toBe('primary-run');
+    expect(batch.tasks[0].workflow_results).toHaveLength(2);
+    expect(runs[0].workflow_results?.map((result) => result.status)).toEqual(['succeeded', 'failed']);
+  });
+
+  it('marks a dual-workflow task failed only when both workflows fail', async () => {
+    __setWorkflowControlsForTest(async () => [
+      {
+        workflow_id: 'primary',
+        workflow_name: '线上工作流',
+        status: 'failed',
+        result_files: [],
+        error: '主流程失败'
+      },
+      {
+        workflow_id: 'compare',
+        workflow_name: '对照工作流',
+        status: 'failed',
+        result_files: [],
+        error: '对照流程失败'
+      }
+    ]);
+    const batch = makeBatch();
+    startSelectedTasks(batch.id, [batch.tasks[0].id]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const runs = getTaskRuns(batch.tasks[0].id);
+
+    expect(batch.tasks[0].status).toBe('failed');
+    expect(batch.tasks[0].error).toContain('主流程失败');
+    expect(batch.tasks[0].error).toContain('对照流程失败');
+    expect(runs[0].workflow_results).toHaveLength(2);
   });
 
   it('registers history-only run files when task runs are listed', () => {

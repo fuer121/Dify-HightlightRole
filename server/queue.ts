@@ -1,13 +1,14 @@
 import { nanoid } from 'nanoid';
-import type { Batch, BatchLogEvent, BatchTask, ColumnMapping, ParsedWorkbook } from './types.js';
+import type { Batch, BatchLogEvent, BatchTask, ColumnMapping, DifyRunResult, ParsedWorkbook, WorkflowResult } from './types.js';
 import { compileRows } from './workbooks.js';
 import {
   applyDifyResult,
+  applyWorkflowResultsToTask,
   DifyError,
   extractIntermediateOutputs,
   extractProgress,
-  runDifyWorkflow,
-  stopDifyWorkflowTask,
+  runDifyWorkflows,
+  stopDifyWorkflowTaskByWorkflowId,
   __testables
 } from './dify.js';
 import {
@@ -29,8 +30,12 @@ import {
   updateBookName
 } from './store.js';
 
-type RunWorkflow = typeof runDifyWorkflow;
-type StopWorkflow = typeof stopDifyWorkflowTask;
+type RunWorkflow = (
+  task: BatchTask,
+  batchId: string,
+  onEvent?: (payload: unknown) => void
+) => Promise<DifyRunResult | WorkflowResult[]>;
+type StopWorkflow = (taskId: string, batchId: string, workflowId?: string) => Promise<unknown>;
 
 interface BookTaskFilters {
   status?: string;
@@ -44,8 +49,8 @@ interface BookTaskFilters {
   valueStatus?: string;
 }
 
-let workflowRunner: RunWorkflow = runDifyWorkflow;
-let workflowStopper: StopWorkflow = stopDifyWorkflowTask;
+let workflowRunner: RunWorkflow = runDifyWorkflows;
+let workflowStopper: StopWorkflow = stopDifyWorkflowTaskByWorkflowId;
 
 const batches = new Map<string, Batch>();
 const subscribers = new Map<string, Set<(batch: Batch) => void>>();
@@ -58,7 +63,11 @@ function now() {
 function serializeTask(task: BatchTask): BatchTask {
   return {
     ...task,
-    result_files: task.result_files.map((file) => ({ ...file }))
+    result_files: task.result_files.map((file) => ({ ...file })),
+    workflow_results: task.workflow_results?.map((result) => ({
+      ...result,
+      result_files: result.result_files.map((file) => ({ ...file }))
+    }))
   };
 }
 
@@ -232,6 +241,7 @@ function resetTaskForRetry(task: BatchTask) {
   task.role = undefined;
   task.title = undefined;
   task.result_files = [];
+  task.workflow_results = undefined;
   task.result_text = undefined;
   task.raw_outputs = undefined;
   task.error = undefined;
@@ -248,6 +258,7 @@ async function runTask(batch: Batch, task: BatchTask) {
   task.finished_at = undefined;
   task.error = undefined;
   task.result_files = [];
+  task.workflow_results = undefined;
   task.stop_requested_at = undefined;
   task.is_valid = undefined;
   task.paragraph_description = undefined;
@@ -284,7 +295,21 @@ async function runTask(batch: Batch, task: BatchTask) {
         emit(batch);
         return;
       }
-      await applyDifyResult(task, result);
+      if (Array.isArray(result)) {
+        const preferredSuccess = applyWorkflowResultsToTask(task, result);
+        if (!preferredSuccess) {
+          task.status = 'failed';
+          task.finished_at = now();
+          task.elapsed_seconds = Number(((Date.now() - started) / 1000).toFixed(1));
+          task.progress_label = '执行失败';
+          addEvent(batch, 'error', `第 ${task.row_no} 行失败：${task.error ?? '两个工作流均失败'}`, task.id);
+          recordFinishedRun(task);
+          emit(batch);
+          return;
+        }
+      } else {
+        await applyDifyResult(task, result);
+      }
       task.status = 'succeeded';
       task.finished_at = now();
       task.elapsed_seconds = Number(((Date.now() - started) / 1000).toFixed(1));
@@ -489,6 +514,15 @@ function findBatchContainingTask(taskId: string) {
   return undefined;
 }
 
+function workflowTaskRefs(task: BatchTask) {
+  const refs = new Map<string, { taskId: string; workflowId: string }>();
+  if (task.dify_task_id) refs.set(`primary:${task.dify_task_id}`, { taskId: task.dify_task_id, workflowId: 'primary' });
+  for (const result of task.workflow_results ?? []) {
+    if (result.dify_task_id) refs.set(`${result.workflow_id}:${result.dify_task_id}`, { taskId: result.dify_task_id, workflowId: result.workflow_id });
+  }
+  return [...refs.values()];
+}
+
 export async function pauseTask(batchId: string, taskId: string) {
   const batch = batches.get(batchId);
   if (!batch) throw new Error('任务清单不存在');
@@ -515,9 +549,10 @@ export async function pauseTask(batchId: string, taskId: string) {
   addEvent(batch, 'task', `正在停止第 ${task.row_no} 行`, task.id);
   emit(batch);
 
-  if (task.dify_task_id) {
+  const refs = workflowTaskRefs(task);
+  if (refs.length > 0) {
     try {
-      await workflowStopper(task.dify_task_id, batch.id);
+      await Promise.all(refs.map((ref) => workflowStopper(ref.taskId, batch.id, ref.workflowId)));
     } catch (error) {
       task.stop_requested_at = undefined;
       task.pause_reason = undefined;
@@ -557,9 +592,10 @@ export async function deleteTask(batchId: string, taskId: string) {
   if (task.status === 'running') {
     task.stop_requested_at = now();
     task.progress_label = '删除前停止 Dify 任务';
-    if (task.dify_task_id) {
+    const refs = workflowTaskRefs(task);
+    if (refs.length > 0) {
       try {
-        await workflowStopper(task.dify_task_id, batch.id);
+        await Promise.all(refs.map((ref) => workflowStopper(ref.taskId, batch.id, ref.workflowId)));
       } catch (error) {
         const message = error instanceof Error ? error.message : '停止任务失败';
         addEvent(batch, 'error', `删除第 ${task.row_no} 行前停止失败，仍将移除：${message}`, task.id);
@@ -582,9 +618,10 @@ export async function deleteBatch(batchId: string) {
     if (task.status === 'running') {
       task.stop_requested_at = now();
       task.progress_label = '删除任务清单前停止 Dify 任务';
-      if (task.dify_task_id) {
+      const refs = workflowTaskRefs(task);
+      if (refs.length > 0) {
         try {
-          await workflowStopper(task.dify_task_id, batch.id);
+          await Promise.all(refs.map((ref) => workflowStopper(ref.taskId, batch.id, ref.workflowId)));
         } catch (error) {
           const message = error instanceof Error ? error.message : '停止任务失败';
           addEvent(batch, 'error', `删除任务清单前停止第 ${task.row_no} 行失败：${message}`, task.id);
@@ -783,6 +820,6 @@ export function hydrateBatchesFromStore() {
 }
 
 export function __setWorkflowControlsForTest(runner?: RunWorkflow, stopper?: StopWorkflow) {
-  workflowRunner = runner ?? runDifyWorkflow;
-  workflowStopper = stopper ?? stopDifyWorkflowTask;
+  workflowRunner = runner ?? runDifyWorkflows;
+  workflowStopper = stopper ?? stopDifyWorkflowTaskByWorkflowId;
 }

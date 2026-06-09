@@ -72,6 +72,23 @@ interface ResultFile {
   remoteUrl?: string;
 }
 
+interface WorkflowResult {
+  workflow_id: string;
+  workflow_name: string;
+  status: 'running' | 'succeeded' | 'failed';
+  workflow_run_id?: string;
+  dify_task_id?: string;
+  elapsed_seconds?: number;
+  is_valid?: unknown;
+  paragraph_description?: string;
+  role?: string[];
+  title?: string;
+  result_files: ResultFile[];
+  result_text?: string;
+  raw_outputs?: unknown;
+  error?: string;
+}
+
 interface BatchTask {
   id: string;
   batch_id?: string;
@@ -98,6 +115,7 @@ interface BatchTask {
   role?: string[];
   title?: string;
   result_files: ResultFile[];
+  workflow_results?: WorkflowResult[];
   result_text?: string;
   raw_outputs?: unknown;
   error?: string;
@@ -146,6 +164,7 @@ interface TaskRunRecord {
   dify_task_id?: string;
   is_valid?: unknown;
   result_files: ResultFile[];
+  workflow_results?: WorkflowResult[];
   result_text?: string;
   raw_outputs?: unknown;
   error?: string;
@@ -163,6 +182,12 @@ interface TaskPagination {
 interface AppHealthConfig {
   config?: {
     difyWorkflowName?: string | null;
+    difyWorkflows?: Array<{
+      id: string;
+      name: string;
+      configured: boolean;
+      responseMode: string;
+    }>;
   };
 }
 
@@ -375,6 +400,10 @@ const qualityStatusLabel: Record<QualityRunStatus, string> = {
 };
 
 const BOOK_TASK_TABLE_WIDTHS_KEY = 'dify-books:task-table-column-widths';
+const BOOK_DETAIL_PANEL_WIDTH_KEY = 'dify-books:detail-panel-width';
+const DEFAULT_BOOK_DETAIL_PANEL_WIDTH = 380;
+const MIN_BOOK_DETAIL_PANEL_WIDTH = 320;
+const MAX_BOOK_DETAIL_PANEL_WIDTH = 720;
 const BOOK_TASK_COLUMN_CONFIG: Array<{ key: BookTaskColumnKey; label: string; defaultWidth: number; minWidth: number; maxWidth: number }> = [
   { key: 'status', label: '状态', defaultWidth: 116, minWidth: 92, maxWidth: 180 },
   { key: 'image', label: '图片', defaultWidth: 92, minWidth: 70, maxWidth: 150 },
@@ -535,6 +564,29 @@ function saveBookTaskColumnWidths(widths: BookTaskColumnWidths) {
   }
 }
 
+function clampBookDetailPanelWidth(width: number) {
+  return Math.round(Math.min(MAX_BOOK_DETAIL_PANEL_WIDTH, Math.max(MIN_BOOK_DETAIL_PANEL_WIDTH, width)));
+}
+
+function loadBookDetailPanelWidth() {
+  if (typeof window === 'undefined') return DEFAULT_BOOK_DETAIL_PANEL_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(BOOK_DETAIL_PANEL_WIDTH_KEY);
+    const value = raw ? Number(raw) : DEFAULT_BOOK_DETAIL_PANEL_WIDTH;
+    return Number.isFinite(value) ? clampBookDetailPanelWidth(value) : DEFAULT_BOOK_DETAIL_PANEL_WIDTH;
+  } catch {
+    return DEFAULT_BOOK_DETAIL_PANEL_WIDTH;
+  }
+}
+
+function saveBookDetailPanelWidth(width: number) {
+  try {
+    window.localStorage?.setItem(BOOK_DETAIL_PANEL_WIDTH_KEY, String(width));
+  } catch {
+    // Resizing should keep working even if the embedded browser blocks localStorage.
+  }
+}
+
 function buildTaskQueryState(
   draft: TaskQueryState,
   overrides: TaskQueryOverrides = {}
@@ -592,11 +644,16 @@ export function App() {
     initialPageParam === 'quality' ? 'quality' : initialPageParam === 'characters' ? 'characters' : 'books';
   const [page, setPage] = useState<AppPage>(initialPage);
   const [difyWorkflowName, setDifyWorkflowName] = useState('LL-段落高光生图-效果测试');
+  const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     fetch('/api/health')
       .then((response) => readJson<AppHealthConfig>(response))
       .then((payload) => {
+        if (payload.config?.difyWorkflows?.length) {
+          setDifyWorkflowName(payload.config.difyWorkflows.map((workflow) => workflow.name).join(' / '));
+          return;
+        }
         if (payload.config?.difyWorkflowName) {
           setDifyWorkflowName(payload.config.difyWorkflowName);
         }
@@ -620,11 +677,27 @@ export function App() {
   return (
     <main className="app-shell side-shell">
       {page === 'quality' ? (
-        <QualityWorkspace onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
+        <QualityWorkspace
+          onNavigate={updatePage}
+          difyWorkflowName={difyWorkflowName}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        />
       ) : page === 'characters' ? (
-        <CharacterWorkspace onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
+        <CharacterWorkspace
+          onNavigate={updatePage}
+          difyWorkflowName={difyWorkflowName}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        />
       ) : (
-        <BooksManagementPage page={page} onNavigate={updatePage} difyWorkflowName={difyWorkflowName} />
+        <BooksManagementPage
+          page={page}
+          onNavigate={updatePage}
+          difyWorkflowName={difyWorkflowName}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        />
       )}
     </main>
   );
@@ -634,54 +707,79 @@ function WorkspaceSidebar({
   page,
   onChange,
   difyWorkflowName,
+  isCollapsed,
+  onToggle,
   bookDirectory,
   children
 }: {
   page: AppPage;
   onChange: (page: AppPage) => void;
   difyWorkflowName: string;
+  isCollapsed: boolean;
+  onToggle: () => void;
   bookDirectory?: ReactNode;
   children?: ReactNode;
 }) {
   return (
-    <aside className="workspace-sidebar">
+    <aside className={`workspace-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-brand">
         <div className="brand-mark">D</div>
-        <div>
+        <div className="sidebar-brand-copy">
           <strong>Dify 书籍库</strong>
           <span>高光段落生图工作台</span>
         </div>
+        <button className="sidebar-collapse-button" onClick={onToggle} aria-label={isCollapsed ? '展开侧边栏' : '收起侧边栏'} title={isCollapsed ? '展开' : '收起'}>
+          {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
       </div>
       <nav className="sidebar-nav">
         <div className="sidebar-nav-group">
-          <button className={page === 'books' ? 'active' : ''} onClick={() => onChange('books')}>
+          <button className={page === 'books' ? 'active' : ''} onClick={() => onChange('books')} title="书籍库">
             <BookOpen size={16} />
-            书籍库
+            <span>书籍库</span>
           </button>
-          {bookDirectory}
+          {!isCollapsed && bookDirectory}
         </div>
-        <button className={page === 'quality' ? 'active' : ''} onClick={() => onChange('quality')}>
+        <button className={page === 'quality' ? 'active' : ''} onClick={() => onChange('quality')} title="质量判断">
           <SlidersHorizontal size={16} />
-          质量判断
+          <span>质量判断</span>
         </button>
-        <button className={page === 'characters' ? 'active' : ''} onClick={() => onChange('characters')}>
+        <button className={page === 'characters' ? 'active' : ''} onClick={() => onChange('characters')} title="角色形象提取">
           <ImageIcon size={16} />
-          角色形象提取
+          <span>角色形象提取</span>
         </button>
       </nav>
-      {children}
-      <div className="sidebar-workflow-info" aria-label="当前 Dify 工作流">
-        <span>Dify 工作流</span>
-        <strong title={difyWorkflowName}>{difyWorkflowName}</strong>
-      </div>
+      {!isCollapsed && children}
+      {!isCollapsed && (
+        <div className="sidebar-workflow-info" aria-label="当前 Dify 工作流">
+          <span>Dify 工作流</span>
+          <strong title={difyWorkflowName}>{difyWorkflowName}</strong>
+        </div>
+      )}
     </aside>
   );
 }
 
-function QualityWorkspace({ onNavigate, difyWorkflowName }: { onNavigate: (page: AppPage) => void; difyWorkflowName: string }) {
+function QualityWorkspace({
+  onNavigate,
+  difyWorkflowName,
+  isSidebarCollapsed,
+  onToggleSidebar
+}: {
+  onNavigate: (page: AppPage) => void;
+  difyWorkflowName: string;
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   return (
-    <div className="workspace-frame">
-      <WorkspaceSidebar page="quality" onChange={onNavigate} difyWorkflowName={difyWorkflowName}>
+    <div className={`workspace-frame ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <WorkspaceSidebar
+        page="quality"
+        onChange={onNavigate}
+        difyWorkflowName={difyWorkflowName}
+        isCollapsed={isSidebarCollapsed}
+        onToggle={onToggleSidebar}
+      >
         <div className="sidebar-note">
           <Sparkles size={16} />
           <span>质量判断保留为辅助工具，生图任务仍在书籍库中管理。</span>
@@ -694,10 +792,26 @@ function QualityWorkspace({ onNavigate, difyWorkflowName }: { onNavigate: (page:
   );
 }
 
-function CharacterWorkspace({ onNavigate, difyWorkflowName }: { onNavigate: (page: AppPage) => void; difyWorkflowName: string }) {
+function CharacterWorkspace({
+  onNavigate,
+  difyWorkflowName,
+  isSidebarCollapsed,
+  onToggleSidebar
+}: {
+  onNavigate: (page: AppPage) => void;
+  difyWorkflowName: string;
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   return (
-    <div className="workspace-frame">
-      <WorkspaceSidebar page="characters" onChange={onNavigate} difyWorkflowName={difyWorkflowName}>
+    <div className={`workspace-frame ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <WorkspaceSidebar
+        page="characters"
+        onChange={onNavigate}
+        difyWorkflowName={difyWorkflowName}
+        isCollapsed={isSidebarCollapsed}
+        onToggle={onToggleSidebar}
+      >
         <div className="sidebar-note">
           <ImageIcon size={16} />
           <span>从段落场景图中提取主要人物，并生成纯白背景人物立绘。</span>
@@ -1402,14 +1516,8 @@ export function BatchWorkflowPage() {
                   第 {selectedTask.row_no} 行 · {statusLabel[selectedTask.status]}
                 </div>
                 <ProgressCell task={selectedTask} wide />
-                {selectedTask.result_files.length > 0 ? (
-                  <div className="image-grid">
-                    {selectedTask.result_files.map((file) => (
-                      <button className="image-preview-button" onClick={() => setLightboxFile(file)} key={file.id}>
-                        <img src={absolutePreviewUrl(file.previewUrl)} alt={file.name} />
-                      </button>
-                    ))}
-                  </div>
+                {workflowResultsForItem(selectedTask).length > 0 ? (
+                  <WorkflowResultCards results={workflowResultsForItem(selectedTask)} onPreview={setLightboxFile} />
                 ) : (
                   <ImagePlaceholder task={selectedTask} />
                 )}
@@ -1537,6 +1645,125 @@ function ImagePlaceholder({ task }: { task: BatchTask }) {
   );
 }
 
+function workflowResultsForItem(item: BatchTask | TaskRunRecord): WorkflowResult[] {
+  if (item.workflow_results?.length) return item.workflow_results;
+  const hasLegacyOutput = item.result_files.length > 0 || Boolean(item.result_text) || Boolean(item.workflow_run_id) || Boolean(item.error);
+  if (!hasLegacyOutput) return [];
+  return [
+    {
+      workflow_id: 'primary',
+      workflow_name: '主工作流',
+      status: item.status === 'failed' ? 'failed' : 'succeeded',
+      workflow_run_id: item.workflow_run_id,
+      dify_task_id: item.dify_task_id,
+      elapsed_seconds: item.elapsed_seconds,
+      is_valid: item.is_valid,
+      result_files: item.result_files,
+      result_text: item.result_text,
+      raw_outputs: item.raw_outputs,
+      error: item.error
+    }
+  ];
+}
+
+function workflowOutputString(result: WorkflowResult, key: string) {
+  const value = asObject(result.raw_outputs)?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function workflowResultTitle(result: WorkflowResult) {
+  if (result.title) return result.title;
+  const title = workflowOutputString(result, 'title');
+  if (title) return title;
+  if (!result.result_text) return '暂无标题';
+  return truncate(result.result_text.replace(/\s+/g, ' '), 40);
+}
+
+function workflowResultDescription(result: WorkflowResult) {
+  if (result.paragraph_description) return result.paragraph_description;
+  const paragraphDescription = workflowOutputString(result, 'paragraph_description');
+  if (paragraphDescription) return paragraphDescription;
+  const description = workflowOutputString(result, 'description');
+  if (description) return description;
+  if (!result.result_text) return undefined;
+  return truncate(result.result_text.replace(/\s+/g, ' '), 120);
+}
+
+function WorkflowResultCards({
+  results,
+  onPreview
+}: {
+  results: WorkflowResult[];
+  onPreview: (file: ResultFile) => void;
+}) {
+  if (results.length === 0) {
+    return (
+      <div className="image-placeholder">
+        <ImageIcon size={24} />
+        暂无工作流结果
+      </div>
+    );
+  }
+
+  return (
+    <div className="workflow-result-grid">
+      {results.map((result) => (
+        <section className={`workflow-result-card ${result.status}`} key={result.workflow_id}>
+          <header>
+            <div>
+              <strong>{result.workflow_name}</strong>
+              <span>{result.status === 'succeeded' ? '已生成' : result.status === 'running' ? '生成中' : '失败'}</span>
+            </div>
+            {result.elapsed_seconds !== undefined ? <small>{result.elapsed_seconds}s</small> : null}
+          </header>
+          {result.result_files.length > 0 ? (
+            <div className="workflow-image-list">
+              {result.result_files.map((file) => (
+                <button className="image-preview-button" onClick={() => onPreview(file)} key={file.id}>
+                  <img src={absolutePreviewUrl(file.previewUrl)} alt={file.name} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="run-thumb-empty">{result.status === 'failed' ? '未生成图片' : result.status === 'running' ? '生成中' : '暂无图片'}</div>
+          )}
+          <h3>{workflowResultTitle(result)}</h3>
+          {workflowResultDescription(result) && <p>{workflowResultDescription(result)}</p>}
+          {result.error && (
+            <div className="task-error">
+              <AlertCircle size={16} />
+              {result.error}
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function WorkflowRunSummary({ run, onPreview }: { run: TaskRunRecord; onPreview: (file: ResultFile) => void }) {
+  const results = workflowResultsForItem(run);
+  if (results.length === 0) {
+    return <div className="run-thumb-empty">暂无图片</div>;
+  }
+  return (
+    <div className="workflow-run-summary">
+      {results.map((result) => (
+        <div className={`workflow-run-chip ${result.status}`} key={result.workflow_id}>
+          <span>{result.workflow_name}</span>
+          {result.result_files[0] ? (
+            <button className="run-thumb-button" onClick={() => onPreview(result.result_files[0])}>
+              <img src={absolutePreviewUrl(result.result_files[0].previewUrl)} alt={result.result_files[0].name} />
+            </button>
+          ) : (
+            <div className="run-thumb-empty">{result.status === 'failed' ? '失败' : result.status === 'running' ? '生成中' : '暂无图片'}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatRawValue(value: unknown) {
   if (value === undefined || value === null) return '-';
   if (typeof value === 'string') return value;
@@ -1651,11 +1878,15 @@ function ResizableTableHeader({
 function BooksManagementPage({
   page,
   onNavigate,
-  difyWorkflowName
+  difyWorkflowName,
+  isSidebarCollapsed,
+  onToggleSidebar
 }: {
   page: AppPage;
   onNavigate: (page: AppPage) => void;
   difyWorkflowName: string;
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 }) {
   const [books, setBooks] = useState<BookSummary[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<number | null>(null);
@@ -1698,8 +1929,10 @@ function BooksManagementPage({
   const [savingBatchNameId, setSavingBatchNameId] = useState<string | null>(null);
   const [recentImportedBookIds, setRecentImportedBookIds] = useState<number[]>([]);
   const [taskColumnWidths, setTaskColumnWidths] = useState<BookTaskColumnWidths>(() => loadBookTaskColumnWidths());
+  const [bookDetailPanelWidth, setBookDetailPanelWidth] = useState(() => loadBookDetailPanelWidth());
   const taskColumnWidthsRef = useRef(taskColumnWidths);
   const activeColumnResizeRef = useRef<BookTaskColumnKey | null>(null);
+  const activeBookPanelResizeRef = useRef(false);
   const batchUploadInputRef = useRef<HTMLInputElement | null>(null);
   const rangeFilterRef = useRef<HTMLDivElement | null>(null);
   const appliedTaskQueryStateByScopeRef = useRef<Record<string, TaskQueryState>>({});
@@ -1729,6 +1962,12 @@ function BooksManagementPage({
   const taskTableMinWidth = useMemo(
     () => BOOK_TASK_COLUMN_CONFIG.reduce((total, column) => total + taskColumnWidths[column.key], 0),
     [taskColumnWidths]
+  );
+  const bookMainGridStyle = useMemo(
+    () => ({
+      gridTemplateColumns: `minmax(0, 1fr) 10px ${bookDetailPanelWidth}px`
+    }),
+    [bookDetailPanelWidth]
   );
 
   useEffect(() => {
@@ -2237,12 +2476,65 @@ function BooksManagementPage({
     }
   }
 
+  function startBookPanelResize(clientX: number, target: HTMLButtonElement, pointerId?: number) {
+    if (activeBookPanelResizeRef.current) return;
+    activeBookPanelResizeRef.current = true;
+    const startX = clientX;
+    const startWidth = bookDetailPanelWidth;
+    if (pointerId !== undefined && typeof target.setPointerCapture === 'function') {
+      target.setPointerCapture(pointerId);
+    }
+
+    function updateWidth(nextClientX: number) {
+      const nextWidth = clampBookDetailPanelWidth(startWidth - (nextClientX - startX));
+      setBookDetailPanelWidth(nextWidth);
+      saveBookDetailPanelWidth(nextWidth);
+    }
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      updateWidth(moveEvent.clientX);
+    }
+
+    function handlePointerUp(upEvent: PointerEvent) {
+      updateWidth(upEvent.clientX);
+      activeBookPanelResizeRef.current = false;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      if (pointerId !== undefined && typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    }
+
+    function handleMouseMove(moveEvent: MouseEvent) {
+      updateWidth(moveEvent.clientX);
+    }
+
+    function handleMouseUp(upEvent: MouseEvent) {
+      updateWidth(upEvent.clientX);
+      activeBookPanelResizeRef.current = false;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    }
+
+    if (pointerId !== undefined) {
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+      window.addEventListener('pointercancel', handlePointerUp);
+    } else {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+  }
+
   return (
-    <div className="workspace-frame book-workspace">
+    <div className={`workspace-frame book-workspace ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <WorkspaceSidebar
         page={page}
         onChange={onNavigate}
         difyWorkflowName={difyWorkflowName}
+        isCollapsed={isSidebarCollapsed}
+        onToggle={onToggleSidebar}
         bookDirectory={
           <div className="sidebar-book-list">
             {books.map((book) => (
@@ -2304,7 +2596,7 @@ function BooksManagementPage({
       </section>
 
       {selectedBook ? (
-      <section className="books-layout book-main-grid">
+      <section className="books-layout book-main-grid" style={bookMainGridStyle}>
         <section className="books-main main-panel">
           <div className="book-batch-strip">
             <button
@@ -2694,6 +2986,20 @@ function BooksManagementPage({
           </div>
         </section>
 
+        <button
+          className="book-panel-resizer"
+          aria-label="调整任务详情宽度"
+          title="拖动调整任务列表和任务详情宽度"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            startBookPanelResize(event.clientX, event.currentTarget, event.pointerId);
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            startBookPanelResize(event.clientX, event.currentTarget);
+          }}
+        />
+
         <aside className="books-detail right-panel">
           <div className="panel-section result-panel">
             <div className="panel-heading">
@@ -2715,20 +3021,7 @@ function BooksManagementPage({
                   <TaskActions task={selectedTask} onAction={(action) => void storedTaskAction(selectedTask, action)} />
                 </div>
                 <ProgressCell task={selectedTask} wide />
-                {selectedTask.result_files.length > 0 ? (
-                  <div className="image-grid">
-                    {selectedTask.result_files.map((file) => (
-                      <button className="image-preview-button" onClick={() => setLightboxFile(file)} key={file.id}>
-                        <img src={absolutePreviewUrl(file.previewUrl)} alt={file.name} />
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="image-placeholder">
-                    <ImageIcon size={24} />
-                    暂无图片
-                  </div>
-                )}
+                <WorkflowResultCards results={workflowResultsForItem(selectedTask)} onPreview={setLightboxFile} />
                 <div className="result-info">
                   <h2>{selectedTask.title || '暂无标题'}</h2>
                   <div className="result-meta">
@@ -2775,13 +3068,7 @@ function BooksManagementPage({
                           <strong>{runTitle(run)}</strong>
                           <small>{new Date(run.created_at).toLocaleString()}</small>
                         </header>
-                        {run.result_files[0] ? (
-                          <button className="run-thumb-button" onClick={() => setLightboxFile(run.result_files[0])}>
-                            <img src={absolutePreviewUrl(run.result_files[0].previewUrl)} alt={run.result_files[0].name} />
-                          </button>
-                        ) : (
-                          <div className="run-thumb-empty">暂无图片</div>
-                        )}
+                        <WorkflowRunSummary run={run} onPreview={setLightboxFile} />
                         <div className="run-compare-meta">
                           <span>is_valid：{runIsValid(run)}</span>
                           <span>{run.elapsed_seconds ? `耗时 ${run.elapsed_seconds}s` : '耗时 -'}</span>
@@ -2802,13 +3089,7 @@ function BooksManagementPage({
                     </div>
                     <p className="run-item-title">{runTitle(run)}</p>
                     {runDescription(run) && <p>{runDescription(run)}</p>}
-                    {run.result_files[0] ? (
-                      <button className="run-thumb-button" onClick={() => setLightboxFile(run.result_files[0])}>
-                        <img src={absolutePreviewUrl(run.result_files[0].previewUrl)} alt={run.result_files[0].name} />
-                      </button>
-                    ) : (
-                      <div className="run-thumb-empty">暂无图片</div>
-                    )}
+                    <WorkflowRunSummary run={run} onPreview={setLightboxFile} />
                     {run.error && <p>{run.error}</p>}
                     <div className="run-item-actions">
                       <button className="secondary-action" onClick={() => toggleRunCompare(run.id)}>

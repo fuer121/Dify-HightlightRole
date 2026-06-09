@@ -11,7 +11,8 @@ import type {
   BookSummary,
   ResultFile,
   TaskRunRecord,
-  TaskStatus
+  TaskStatus,
+  WorkflowResult
 } from './types.js';
 import { registerStoredFile } from './fileStore.js';
 
@@ -53,6 +54,44 @@ function optionalNumber(value: unknown) {
 
 function boolNumber(value: boolean) {
   return value ? 1 : 0;
+}
+
+function defaultPrimaryWorkflowName() {
+  return process.env.DIFY_WORKFLOW_NAME ?? '线上工作流';
+}
+
+function registerWorkflowResultFiles(workflowResults: WorkflowResult[]) {
+  for (const result of workflowResults) {
+    for (const file of result.result_files) {
+      registerStoredFile(file);
+    }
+  }
+}
+
+function legacyWorkflowResults(row: SqlRow, resultFiles: ResultFile[], rawOutputs: unknown): WorkflowResult[] {
+  const hasLegacyOutput =
+    resultFiles.length > 0 ||
+    optionalString(row.result_text) !== undefined ||
+    optionalString(row.workflow_run_id) !== undefined ||
+    optionalString(row.dify_task_id) !== undefined ||
+    rawOutputs !== undefined ||
+    optionalString(row.error) !== undefined;
+  if (!hasLegacyOutput) return [];
+  return [
+    {
+      workflow_id: 'primary',
+      workflow_name: defaultPrimaryWorkflowName(),
+      status: row.status === 'failed' ? 'failed' : 'succeeded',
+      workflow_run_id: optionalString(row.workflow_run_id),
+      dify_task_id: optionalString(row.dify_task_id),
+      elapsed_seconds: optionalNumber(row.elapsed_seconds),
+      is_valid: parseJson(row.is_valid_json, undefined),
+      result_files: resultFiles,
+      result_text: optionalString(row.result_text),
+      raw_outputs: rawOutputs,
+      error: optionalString(row.error)
+    }
+  ];
 }
 
 export function getDb() {
@@ -146,6 +185,7 @@ export function initializeStore() {
       role_json TEXT,
       title TEXT,
       result_files_json TEXT NOT NULL DEFAULT '[]',
+      workflow_results_json TEXT NOT NULL DEFAULT '[]',
       result_text TEXT,
       raw_outputs_json TEXT,
       error TEXT,
@@ -178,6 +218,7 @@ export function initializeStore() {
       dify_task_id TEXT,
       is_valid_json TEXT,
       result_files_json TEXT NOT NULL DEFAULT '[]',
+      workflow_results_json TEXT NOT NULL DEFAULT '[]',
       result_text TEXT,
       raw_outputs_json TEXT,
       error TEXT,
@@ -219,6 +260,12 @@ export function initializeStore() {
   `);
   if (!columnExists('task_runs', 'is_valid_json')) {
     database.exec('ALTER TABLE task_runs ADD COLUMN is_valid_json TEXT');
+  }
+  if (!columnExists('tasks', 'workflow_results_json')) {
+    database.exec("ALTER TABLE tasks ADD COLUMN workflow_results_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!columnExists('task_runs', 'workflow_results_json')) {
+    database.exec("ALTER TABLE task_runs ADD COLUMN workflow_results_json TEXT NOT NULL DEFAULT '[]'");
   }
 }
 
@@ -337,10 +384,10 @@ function saveTaskRow(task: BatchTask, batchId: string | null, sourceKind: string
         id, batch_id, row_no, book_id, paragraph_content, chapter_sort, status, attempts,
         started_at, finished_at, elapsed_seconds, workflow_run_id, dify_task_id, progress_percent,
         progress_label, pause_reason, stop_requested_at, is_valid_json, paragraph_description,
-        role_json, title, result_files_json, result_text, raw_outputs_json, error, source_kind,
+        role_json, title, result_files_json, workflow_results_json, result_text, raw_outputs_json, error, source_kind,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         batch_id = COALESCE(tasks.batch_id, excluded.batch_id),
         row_no = excluded.row_no,
@@ -363,6 +410,7 @@ function saveTaskRow(task: BatchTask, batchId: string | null, sourceKind: string
         role_json = excluded.role_json,
         title = excluded.title,
         result_files_json = excluded.result_files_json,
+        workflow_results_json = excluded.workflow_results_json,
         result_text = excluded.result_text,
         raw_outputs_json = excluded.raw_outputs_json,
         error = excluded.error,
@@ -397,6 +445,7 @@ function saveTaskRow(task: BatchTask, batchId: string | null, sourceKind: string
       task.role ? json(task.role) : null,
       task.title ?? null,
       json(task.result_files),
+      json(task.workflow_results ?? []),
       task.result_text ?? null,
       task.raw_outputs === undefined ? null : json(task.raw_outputs),
       task.error ?? null,
@@ -449,10 +498,10 @@ export function recordTaskRun(task: BatchTask) {
       `
       INSERT INTO task_runs (
         id, task_id, attempt_no, status, started_at, finished_at, elapsed_seconds,
-        workflow_run_id, dify_task_id, is_valid_json, result_files_json, result_text,
+        workflow_run_id, dify_task_id, is_valid_json, result_files_json, workflow_results_json, result_text,
         raw_outputs_json, error, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -467,6 +516,7 @@ export function recordTaskRun(task: BatchTask) {
       task.dify_task_id ?? null,
       task.is_valid === undefined ? null : json(task.is_valid),
       json(task.result_files),
+      json(task.workflow_results ?? []),
       task.result_text ?? null,
       task.raw_outputs === undefined ? null : json(task.raw_outputs),
       task.error ?? null,
@@ -475,6 +525,11 @@ export function recordTaskRun(task: BatchTask) {
 }
 
 function taskFromRow(row: SqlRow): BatchTask {
+  const resultFiles = parseJson<ResultFile[]>(row.result_files_json, []);
+  const rawOutputs = parseJson(row.raw_outputs_json, undefined);
+  const parsedWorkflowResults = parseJson<WorkflowResult[]>(row.workflow_results_json, []);
+  const workflowResults =
+    parsedWorkflowResults.length > 0 ? parsedWorkflowResults : legacyWorkflowResults(row, resultFiles, rawOutputs);
   const task: BatchTask = {
     id: String(row.id),
     batch_id: optionalString(row.batch_id),
@@ -500,14 +555,16 @@ function taskFromRow(row: SqlRow): BatchTask {
     paragraph_description: optionalString(row.paragraph_description),
     role: parseJson<string[] | undefined>(row.role_json, undefined),
     title: optionalString(row.title),
-    result_files: parseJson<ResultFile[]>(row.result_files_json, []),
+    result_files: resultFiles,
+    workflow_results: workflowResults,
     result_text: optionalString(row.result_text),
-    raw_outputs: parseJson(row.raw_outputs_json, undefined),
+    raw_outputs: rawOutputs,
     error: optionalString(row.error)
   };
   for (const file of task.result_files) {
     registerStoredFile(file);
   }
+  registerWorkflowResultFiles(task.workflow_results ?? []);
   return task;
 }
 
@@ -764,9 +821,14 @@ export function listTaskRuns(taskId: string): TaskRunRecord[] {
     .all(taskId)
     .map((row): TaskRunRecord => {
       const resultFiles = parseJson<ResultFile[]>(row.result_files_json, []);
+      const rawOutputs = parseJson(row.raw_outputs_json, undefined);
+      const parsedWorkflowResults = parseJson<WorkflowResult[]>(row.workflow_results_json, []);
+      const workflowResults =
+        parsedWorkflowResults.length > 0 ? parsedWorkflowResults : legacyWorkflowResults(row, resultFiles, rawOutputs);
       for (const file of resultFiles) {
         registerStoredFile(file);
       }
+      registerWorkflowResultFiles(workflowResults);
       return {
         id: String(row.id),
         task_id: String(row.task_id),
@@ -779,8 +841,9 @@ export function listTaskRuns(taskId: string): TaskRunRecord[] {
         dify_task_id: optionalString(row.dify_task_id),
         is_valid: parseJson(row.is_valid_json, undefined),
         result_files: resultFiles,
+        workflow_results: workflowResults,
         result_text: optionalString(row.result_text),
-        raw_outputs: parseJson(row.raw_outputs_json, undefined),
+        raw_outputs: rawOutputs,
         error: optionalString(row.error),
         created_at: String(row.created_at)
       };

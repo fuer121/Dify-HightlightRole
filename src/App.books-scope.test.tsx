@@ -76,7 +76,25 @@ const tasksPayload = {
       input: { book_id: 1, paragraph_content: '第一段', chapter_sort: 1 },
       status: 'queued',
       attempts: 0,
-      result_files: []
+      result_files: [],
+      workflow_results: [
+        {
+          workflow_id: 'primary',
+          workflow_name: '线上工作流',
+          status: 'running',
+          workflow_run_id: 'workflow-primary',
+          dify_task_id: 'task-primary',
+          result_files: []
+        },
+        {
+          workflow_id: 'compare',
+          workflow_name: '对照工作流',
+          status: 'running',
+          workflow_run_id: 'workflow-compare',
+          dify_task_id: 'task-compare',
+          result_files: []
+        }
+      ]
     },
     {
       id: 'task-2',
@@ -131,6 +149,14 @@ function findButton(container: HTMLElement, text: string) {
   const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.includes(text));
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`未找到按钮: ${text}`);
+  }
+  return button;
+}
+
+function findButtonByLabel(container: HTMLElement, label: string) {
+  const button = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('aria-label') === label);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`未找到按钮: ${label}`);
   }
   return button;
 }
@@ -205,6 +231,62 @@ describe('BooksManagementPage continue scope', () => {
     });
     container.remove();
     vi.unstubAllGlobals();
+  });
+
+  it('collapses and expands the workspace sidebar manually', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+
+    const frame = container.querySelector('.workspace-frame');
+    expect(frame?.classList.contains('sidebar-collapsed')).toBe(false);
+
+    await act(async () => {
+      findButtonByLabel(container, '收起侧边栏').click();
+    });
+    expect(frame?.classList.contains('sidebar-collapsed')).toBe(true);
+
+    await act(async () => {
+      findButtonByLabel(container, '展开侧边栏').click();
+    });
+    expect(frame?.classList.contains('sidebar-collapsed')).toBe(false);
+  });
+
+  it('shows workflow comparison cards without debug ids in task detail', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    const detail = container.querySelector('.books-detail');
+    expect(detail?.textContent).toContain('线上工作流');
+    expect(detail?.textContent).toContain('对照工作流');
+    expect(detail?.textContent).not.toContain('运行：');
+    expect(detail?.textContent).not.toContain('任务：');
+  });
+
+  it('resizes the book task list and detail panels by dragging the divider', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+
+    const frame = container.querySelector('.book-main-grid');
+    expect(frame?.getAttribute('style')).toContain('380px');
+    const resizer = findButtonByLabel(container, '调整任务详情宽度');
+
+    await act(async () => {
+      resizer.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 900 }));
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 840 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { clientX: 840 }));
+    });
+
+    expect(frame?.getAttribute('style')).toContain('440px');
   });
 
   it('continues with the last applied query instead of unsaved filter drafts', async () => {

@@ -1,9 +1,17 @@
-import type { BatchTask, DifyRunResult, ResultFile } from './types.js';
+import type { BatchTask, DifyRunResult, ResultFile, WorkflowResult } from './types.js';
 import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
 
 interface DifyErrorOptions {
   retryable?: boolean;
   status?: number;
+}
+
+export interface DifyWorkflowConfig {
+  id: string;
+  name: string;
+  apiBase: string;
+  apiKey?: string;
+  responseMode: string;
 }
 
 export class DifyError extends Error {
@@ -18,9 +26,34 @@ export class DifyError extends Error {
   }
 }
 
-function apiUrl(pathname: string) {
-  const base = process.env.DIFY_API_BASE ?? 'http://dify.qmniu.com/v1';
+function apiUrl(pathname: string, apiBase = process.env.DIFY_API_BASE ?? 'http://dify.qmniu.com/v1') {
+  const base = apiBase;
   return `${base.replace(/\/$/, '')}${pathname}`;
+}
+
+export function getDifyWorkflowConfigs(): DifyWorkflowConfig[] {
+  const primaryApiBase = process.env.DIFY_API_BASE ?? 'http://dify.qmniu.com/v1';
+  const primaryResponseMode = process.env.DIFY_RESPONSE_MODE || 'streaming';
+  return [
+    {
+      id: 'primary',
+      name: process.env.DIFY_WORKFLOW_NAME ?? '线上工作流',
+      apiBase: primaryApiBase,
+      apiKey: process.env.DIFY_API_KEY,
+      responseMode: primaryResponseMode
+    },
+    {
+      id: 'compare',
+      name: process.env.DIFY_COMPARE_WORKFLOW_NAME ?? '对照工作流',
+      apiBase: process.env.DIFY_COMPARE_API_BASE ?? primaryApiBase,
+      apiKey: process.env.DIFY_COMPARE_API_KEY,
+      responseMode: process.env.DIFY_COMPARE_RESPONSE_MODE || primaryResponseMode
+    }
+  ];
+}
+
+function configuredDifyWorkflowConfigs() {
+  return getDifyWorkflowConfigs().filter((config) => Boolean(config.apiKey));
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -274,53 +307,67 @@ export async function runDifyWorkflow(
   batchId: string,
   onEvent?: (payload: unknown) => void
 ): Promise<DifyRunResult> {
-  const apiKey = process.env.DIFY_API_KEY;
-  if (!apiKey) {
-    throw new DifyError('缺少 DIFY_API_KEY，请检查 .env.local', { retryable: false });
+  return runDifyWorkflowWithConfig(getDifyWorkflowConfigs()[0], task, batchId, onEvent);
+}
+
+export async function runDifyWorkflowWithConfig(
+  config: DifyWorkflowConfig,
+  task: BatchTask,
+  batchId: string,
+  onEvent?: (payload: unknown) => void
+): Promise<DifyRunResult> {
+  if (!config.apiKey) {
+    throw new DifyError(`缺少 ${config.id === 'compare' ? 'DIFY_COMPARE_API_KEY' : 'DIFY_API_KEY'}，请检查 .env.local`, {
+      retryable: false
+    });
   }
 
-  const responseMode = process.env.DIFY_RESPONSE_MODE || 'streaming';
   let response: Response;
   try {
-    response = await fetch(apiUrl('/workflows/run'), {
+    response = await fetch(apiUrl('/workflows/run', config.apiBase), {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
-        Accept: responseMode === 'streaming' ? 'text/event-stream' : 'application/json'
+        Accept: config.responseMode === 'streaming' ? 'text/event-stream' : 'application/json'
       },
-      body: JSON.stringify(buildPayload(task, responseMode, batchId))
+      body: JSON.stringify(buildPayload(task, config.responseMode, batchId))
     });
   } catch (error) {
-    throw new DifyError(error instanceof Error ? error.message : 'Dify 网络请求失败', {
+    throw new DifyError(error instanceof Error ? `${config.name}：${error.message}` : `${config.name}：Dify 网络请求失败`, {
       retryable: true
     });
   }
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new DifyError(`Dify 请求失败 ${response.status}${text ? `: ${text}` : ''}`, {
+    throw new DifyError(`${config.name} 请求失败 ${response.status}${text ? `: ${text}` : ''}`, {
       retryable: shouldRetryStatus(response.status),
       status: response.status
     });
   }
 
-  if (responseMode === 'blocking') {
+  if (config.responseMode === 'blocking') {
     return runBlocking(task, response);
   }
   return runStreaming(task, response, onEvent);
 }
 
 export async function stopDifyWorkflowTask(taskId: string, batchId: string) {
-  const apiKey = process.env.DIFY_API_KEY;
-  if (!apiKey) {
-    throw new DifyError('缺少 DIFY_API_KEY，请检查 .env.local', { retryable: false });
+  return stopDifyWorkflowTaskWithConfig(getDifyWorkflowConfigs()[0], taskId, batchId);
+}
+
+export async function stopDifyWorkflowTaskWithConfig(config: DifyWorkflowConfig, taskId: string, batchId: string) {
+  if (!config.apiKey) {
+    throw new DifyError(`缺少 ${config.id === 'compare' ? 'DIFY_COMPARE_API_KEY' : 'DIFY_API_KEY'}，请检查 .env.local`, {
+      retryable: false
+    });
   }
 
-  const response = await fetch(apiUrl(`/workflows/tasks/${taskId}/stop`), {
+  const response = await fetch(apiUrl(`/workflows/tasks/${taskId}/stop`, config.apiBase), {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -330,13 +377,18 @@ export async function stopDifyWorkflowTask(taskId: string, batchId: string) {
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new DifyError(`Dify 停止任务失败 ${response.status}${text ? `: ${text}` : ''}`, {
+    throw new DifyError(`${config.name} 停止任务失败 ${response.status}${text ? `: ${text}` : ''}`, {
       retryable: shouldRetryStatus(response.status),
       status: response.status
     });
   }
 
   return response.json().catch(() => ({}));
+}
+
+export async function stopDifyWorkflowTaskByWorkflowId(taskId: string, batchId: string, workflowId = 'primary') {
+  const config = getDifyWorkflowConfigs().find((item) => item.id === workflowId) ?? getDifyWorkflowConfigs()[0];
+  return stopDifyWorkflowTaskWithConfig(config, taskId, batchId);
 }
 
 function toStringArray(value: unknown) {
@@ -408,7 +460,12 @@ async function normalizeFileValue(taskId: string, value: unknown): Promise<Resul
   return [];
 }
 
-export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
+async function workflowResultFromDifyRun(
+  taskId: string,
+  result: DifyRunResult,
+  config: Pick<DifyWorkflowConfig, 'id' | 'name'>,
+  elapsedSeconds?: number
+): Promise<WorkflowResult> {
   const outputs = result.outputs ?? {};
   const fileValues = [
     outputs.result,
@@ -421,7 +478,7 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
     outputs.image_urls,
     outputs.url
   ];
-  const files = (await Promise.all(fileValues.map((value) => normalizeFileValue(task.id, value)))).flat();
+  const files = (await Promise.all(fileValues.map((value) => normalizeFileValue(taskId, value)))).flat();
   const downloadErrors: string[] = [];
   for (const file of files) {
     if (file.sourceKind === 'remote') {
@@ -433,23 +490,123 @@ export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
     }
   }
   const availableFiles = files.filter((file) => file.sourceKind !== 'remote' || file.localPath);
-  task.workflow_run_id = result.workflowRunId;
-  task.dify_task_id = result.taskId ?? task.dify_task_id;
+  return {
+    workflow_id: config.id,
+    workflow_name: config.name,
+    status: 'succeeded',
+    workflow_run_id: result.workflowRunId,
+    dify_task_id: result.taskId,
+    elapsed_seconds: elapsedSeconds,
+    is_valid: outputs.is_valid,
+    paragraph_description: outputString(outputs.paragraph_description) ?? outputString(outputs.description),
+    role: toStringArray(outputs.role),
+    title: outputString(outputs.title),
+    result_files: availableFiles,
+    result_text:
+      outputString(outputs.result_text) ??
+      outputString(outputs.markdown_output) ??
+      (availableFiles.length === 0 ? outputString(outputs.result) ?? outputString(outputs.image_url) ?? outputString(outputs.url) : undefined),
+    raw_outputs: outputs,
+    error: downloadErrors.length > 0 && availableFiles.length === 0 ? `图片下载失败：${downloadErrors.join('；')}` : undefined
+  };
+}
+
+function applyWorkflowResultToTask(task: BatchTask, workflowResult: WorkflowResult) {
+  task.workflow_run_id = workflowResult.workflow_run_id;
+  task.dify_task_id = workflowResult.dify_task_id ?? task.dify_task_id;
   task.progress_percent = 100;
   task.progress_label = '已完成';
-  task.is_valid = outputs.is_valid ?? task.is_valid;
-  task.paragraph_description = outputString(outputs.paragraph_description) ?? outputString(outputs.description) ?? task.paragraph_description;
-  task.role = toStringArray(outputs.role);
-  task.title = outputString(outputs.title);
-  task.result_files = availableFiles;
-  task.result_text =
-    outputString(outputs.result_text) ??
-    outputString(outputs.markdown_output) ??
-    (availableFiles.length === 0 ? outputString(outputs.result) ?? outputString(outputs.image_url) ?? outputString(outputs.url) : undefined);
-  if (downloadErrors.length > 0 && availableFiles.length === 0) {
-    task.error = `图片下载失败：${downloadErrors.join('；')}`;
+  task.is_valid = workflowResult.is_valid ?? task.is_valid;
+  task.paragraph_description = workflowResult.paragraph_description ?? task.paragraph_description;
+  task.role = workflowResult.role;
+  task.title = workflowResult.title;
+  task.result_files = workflowResult.result_files;
+  task.result_text = workflowResult.result_text;
+  task.raw_outputs = workflowResult.raw_outputs;
+  task.error = workflowResult.error;
+}
+
+export function applyWorkflowResultsToTask(task: BatchTask, workflowResults: WorkflowResult[]) {
+  task.workflow_results = workflowResults;
+  const preferredSuccess =
+    workflowResults.find((result) => result.workflow_id === 'primary' && result.status === 'succeeded') ??
+    workflowResults.find((result) => result.status === 'succeeded');
+  if (preferredSuccess) {
+    applyWorkflowResultToTask(task, preferredSuccess);
+    return preferredSuccess;
   }
-  task.raw_outputs = outputs;
+  task.workflow_run_id = workflowResults.find((result) => result.workflow_run_id)?.workflow_run_id;
+  task.dify_task_id = workflowResults.find((result) => result.dify_task_id)?.dify_task_id ?? task.dify_task_id;
+  task.result_files = [];
+  task.result_text = undefined;
+  task.raw_outputs = workflowResults;
+  task.error = workflowResults.map((result) => `${result.workflow_name}：${result.error ?? '执行失败'}`).join('；');
+  return undefined;
+}
+
+export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
+  const workflowResult = await workflowResultFromDifyRun(task.id, result, getDifyWorkflowConfigs()[0]);
+  task.workflow_results = [workflowResult];
+  applyWorkflowResultToTask(task, workflowResult);
+}
+
+function workflowFailureResult(config: DifyWorkflowConfig, error: unknown, elapsedSeconds?: number): WorkflowResult {
+  return {
+    workflow_id: config.id,
+    workflow_name: config.name,
+    status: 'failed',
+    elapsed_seconds: elapsedSeconds,
+    result_files: [],
+    error: error instanceof Error ? error.message : 'Dify 工作流执行失败'
+  };
+}
+
+function updateRunningWorkflowResult(task: BatchTask, config: DifyWorkflowConfig, payload: unknown) {
+  const difyTaskId = extractTaskId(payload);
+  const workflowRunId = extractWorkflowRunId(payload);
+  if (!difyTaskId && !workflowRunId) return;
+  const existingResults = task.workflow_results ?? [];
+  const existing = existingResults.find((result) => result.workflow_id === config.id);
+  const runningResult: WorkflowResult = {
+    workflow_id: config.id,
+    workflow_name: config.name,
+    status: 'running',
+    result_files: [],
+    ...existing,
+    dify_task_id: difyTaskId ?? existing?.dify_task_id,
+    workflow_run_id: workflowRunId ?? existing?.workflow_run_id
+  };
+  task.workflow_results = existing
+    ? existingResults.map((result) => (result.workflow_id === config.id ? runningResult : result))
+    : [...existingResults, runningResult];
+}
+
+export async function runDifyWorkflows(
+  task: BatchTask,
+  batchId: string,
+  onEvent?: (payload: unknown) => void
+): Promise<WorkflowResult[]> {
+  const configs = configuredDifyWorkflowConfigs();
+  if (configs.length === 0) {
+    throw new DifyError('缺少 DIFY_API_KEY，请检查 .env.local', { retryable: false });
+  }
+
+  return Promise.all(
+    configs.map(async (config) => {
+      const started = Date.now();
+      try {
+        const result = await runDifyWorkflowWithConfig(config, task, batchId, (payload) => {
+          updateRunningWorkflowResult(task, config, payload);
+          onEvent?.(payload);
+        });
+        const elapsedSeconds = Number(((Date.now() - started) / 1000).toFixed(1));
+        return workflowResultFromDifyRun(task.id, result, config, elapsedSeconds);
+      } catch (error) {
+        const elapsedSeconds = Number(((Date.now() - started) / 1000).toFixed(1));
+        return workflowFailureResult(config, error, elapsedSeconds);
+      }
+    })
+  );
 }
 
 export const __testables = {
@@ -460,5 +617,6 @@ export const __testables = {
   isRetryableDifyErrorMessage,
   parseSseBlocks,
   parseSseJson,
-  normalizeFileValue
+  normalizeFileValue,
+  workflowResultFromDifyRun
 };
