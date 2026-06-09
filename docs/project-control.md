@@ -122,30 +122,13 @@
 
 ## Git 记录
 
-- HEAD：`e8d8ca6 Merge pull request #8 from fuer121/codex/bug-fix`
+- HEAD：`ae01928 Add character extraction workspace`
 - 当前分支：`codex/add-newtab`
-- 已跟踪未提交文件：
-  - `.env.example`
-  - `docs/project-control.md`
-  - `server/index.ts`
-  - `server/types.ts`
-  - `server/workbooks.test.ts`
-  - `server/workbooks.ts`
-  - `src/App.tsx`
-  - `src/styles.css`
-- 未跟踪文件：
-  - `.playwright-cli/`
-  - `Dify-DSL/LL-角色形象提取-白底立绘.yml`
-  - `server/characterDify.test.ts`
-  - `server/characterDify.ts`
-  - `server/characterRoutes.ts`
-  - `server/characterStore.ts`
-  - `server/characters.test.ts`
-  - `server/characters.ts`
-  - `src/App.characters.test.tsx`
-  - `src/CharacterExtractionPage.tsx`
-  - `测试文本/`
-- 当前提交建议：提交并推送 `codex/add-newtab`，创建面向 `main` 的 PR。提交范围包含角色工作台、角色 Dify workflow、队列恢复/限速修复、列表筛选优化与主文档同步；不纳入 `.playwright-cli/` 与本地 `测试文本/` 样本。
+- 推送状态：已推送到 `origin/codex/add-newtab`
+- PR：`https://github.com/fuer121/Dify-HightlightRole/pull/9`，draft，base=`main`
+- 本轮功能提交：`ae01928 Add character extraction workspace`
+- 本轮提交范围：角色工作台、角色 Dify workflow、队列恢复/限速修复、列表筛选优化与主文档同步。
+- 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
 
