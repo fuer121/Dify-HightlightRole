@@ -84,6 +84,9 @@ const tasksPayload = {
           status: 'running',
           workflow_run_id: 'workflow-primary',
           dify_task_id: 'task-primary',
+          elapsed_seconds: 12.3,
+          is_valid: 1,
+          role: ['主角A'],
           result_files: []
         },
         {
@@ -92,6 +95,9 @@ const tasksPayload = {
           status: 'running',
           workflow_run_id: 'workflow-compare',
           dify_task_id: 'task-compare',
+          elapsed_seconds: 45.6,
+          is_valid: 0,
+          role: ['主角B'],
           result_files: []
         }
       ]
@@ -218,6 +224,8 @@ describe('BooksManagementPage continue scope', () => {
       if (url.endsWith('/api/tasks/task-1/runs')) return jsonResponse({ runs: [] });
       if (url.endsWith('/api/tasks/task-2/runs')) return jsonResponse({ runs: [] });
       if (url.includes('/api/books/1/continue')) return jsonResponse(continuePayload);
+      if (url.includes('/api/books/1/pause')) return jsonResponse(continuePayload);
+      if (url.includes('/api/books/1/cancel')) return jsonResponse(continuePayload);
 
       throw new Error(`Unhandled fetch: ${url}`);
     });
@@ -265,6 +273,10 @@ describe('BooksManagementPage continue scope', () => {
     const detail = container.querySelector('.books-detail');
     expect(detail?.textContent).toContain('线上工作流');
     expect(detail?.textContent).toContain('对照工作流');
+    expect(detail?.textContent).toContain('角色：主角A');
+    expect(detail?.textContent).toContain('角色：主角B');
+    expect(detail?.textContent).toContain('耗时：12.3s');
+    expect(detail?.textContent).toContain('耗时：45.6s');
     expect(detail?.textContent).not.toContain('运行：');
     expect(detail?.textContent).not.toContain('任务：');
   });
@@ -335,6 +347,53 @@ describe('BooksManagementPage continue scope', () => {
       .map(([url]) => String(url))
       .filter((url) => url.includes('/api/books/1/continue'));
     expect(continueCalls.at(-1)).toBe('/api/books/1/continue?status=succeeded&batchId=batch-1');
+  });
+
+  it('pauses and cancels with the last applied query instead of unsaved filter drafts', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    const statusSelect = findSelectByLabel(container, '任务状态');
+    await act(async () => {
+      statusSelect.value = 'succeeded';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      findButton(container, '查询').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      statusSelect.value = 'queued';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '暂停生图').click();
+    });
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '取消生图').click();
+    });
+    await flushUi();
+
+    expect(findLastCallUrl(fetchSpy, '/api/books/1/pause')).toBe('/api/books/1/pause?status=succeeded&batchId=batch-1');
+    expect(findLastCallUrl(fetchSpy, '/api/books/1/cancel')).toBe('/api/books/1/cancel?status=succeeded&batchId=batch-1');
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('仅取消当前筛选范围内未完成任务'));
   });
 
   it('keeps automatic reloads on the applied scope after continue succeeds', async () => {

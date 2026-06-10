@@ -7,6 +7,7 @@ import {
   __setWorkflowControlsForTest,
   addManualBookTask,
   continueBook,
+  cancelBookTasks,
   createBatch,
   deleteBatch,
   deleteTask,
@@ -15,6 +16,7 @@ import {
   listBatchesForBook,
   listBookSummaries,
   listTasksForBook,
+  pauseBookTasks,
   pauseTask,
   renameBatch,
   renameBook,
@@ -56,6 +58,31 @@ describe('queue', () => {
       paragraph_content: 'paragraph_content',
       chapter_sort: 'chapter_sort'
     });
+
+  const makeBookBatch = () =>
+    createBatch(
+      {
+        ...workbook,
+        id: `workbook-book-${Date.now()}-${Math.random()}`,
+        fileName: 'book-scope.xlsx',
+        sheets: [
+          {
+            ...workbook.sheets[0],
+            rows: [
+              { __row_no: 2, book_id: '1', paragraph_content: '第一段', chapter_sort: '1' },
+              { __row_no: 3, book_id: '1', paragraph_content: '第二段', chapter_sort: '2' },
+              { __row_no: 4, book_id: '1', paragraph_content: '第三段', chapter_sort: '3' }
+            ]
+          }
+        ]
+      },
+      'Sheet1',
+      {
+        book_id: 'book_id',
+        paragraph_content: 'paragraph_content',
+        chapter_sort: 'chapter_sort'
+      }
+    );
 
   it('creates tasks and marks validation failures', () => {
     const batch = makeBatch();
@@ -480,6 +507,96 @@ describe('queue', () => {
     expect(runs).toHaveLength(2);
     expect(runs[0].workflow_run_id).toBe('run-2');
     expect(runs[1].workflow_run_id).toBe('run-1');
+  });
+
+  it('pauses only unfinished book tasks in the requested scope and stops running workflow tasks', async () => {
+    const stopped: Array<{ taskId: string; workflowId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId) => {
+      stopped.push({ taskId, workflowId });
+      return {};
+    });
+    const batch = makeBookBatch();
+    batch.status = 'running';
+    batch.tasks[0].status = 'running';
+    batch.tasks[0].dify_task_id = 'primary-running';
+    batch.tasks[0].workflow_results = [
+      {
+        workflow_id: 'primary',
+        workflow_name: '线上工作流',
+        status: 'running',
+        dify_task_id: 'primary-running',
+        result_files: []
+      },
+      {
+        workflow_id: 'compare',
+        workflow_name: '对照工作流',
+        status: 'running',
+        dify_task_id: 'compare-running',
+        result_files: []
+      }
+    ];
+    saveBatch(batch);
+
+    await pauseBookTasks(1, { batchId: batch.id, rowNoFrom: 2, rowNoTo: 3 });
+
+    expect(stopped).toEqual([
+      { taskId: 'primary-running', workflowId: 'primary' },
+      { taskId: 'compare-running', workflowId: 'compare' }
+    ]);
+    expect(batch.tasks[0].stop_requested_at).toBeTruthy();
+    expect(batch.tasks[1].status).toBe('paused');
+    expect(batch.tasks[1].pause_reason).toBe('batch');
+    expect(batch.tasks[2].status).toBe('queued');
+  });
+
+  it('cancels only unfinished book tasks in the requested scope while keeping finished tasks', async () => {
+    const stopped: Array<{ taskId: string; workflowId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId) => {
+      stopped.push({ taskId, workflowId });
+      return {};
+    });
+    const batch = makeBookBatch();
+    batch.status = 'running';
+    batch.tasks[0].status = 'running';
+    batch.tasks[0].dify_task_id = 'primary-cancel';
+    batch.tasks[0].workflow_results = [
+      {
+        workflow_id: 'primary',
+        workflow_name: '线上工作流',
+        status: 'running',
+        dify_task_id: 'primary-cancel',
+        result_files: []
+      },
+      {
+        workflow_id: 'compare',
+        workflow_name: '对照工作流',
+        status: 'running',
+        dify_task_id: 'compare-cancel',
+        result_files: []
+      }
+    ];
+    batch.tasks[1].status = 'succeeded';
+    batch.tasks[2].status = 'queued';
+    const succeededTaskId = batch.tasks[1].id;
+    saveBatch(batch);
+
+    await cancelBookTasks(1, { batchId: batch.id, rowNoFrom: 2, rowNoTo: 4 });
+
+    expect(stopped).toEqual([
+      { taskId: 'primary-cancel', workflowId: 'primary' },
+      { taskId: 'compare-cancel', workflowId: 'compare' }
+    ]);
+    expect(batch.tasks.map((task) => task.id)).toEqual([succeededTaskId]);
+    expect(batch.tasks).toHaveLength(1);
+    expect(batch.tasks[0].status).toBe('succeeded');
+    expect(listTasksForBook(1, { batchId: batch.id }).map((task) => task.status)).toEqual(['succeeded']);
+  });
+
+  it('requires a concrete task list when pausing or canceling book tasks', async () => {
+    makeBookBatch();
+
+    await expect(pauseBookTasks(1)).rejects.toThrow('请先选择一个上传文档任务清单');
+    await expect(cancelBookTasks(1)).rejects.toThrow('请先选择一个上传文档任务清单');
   });
 
   it('requires an uploaded document task list before continuing a book', () => {
