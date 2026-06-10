@@ -146,6 +146,7 @@ async function runJob(job: CharacterJob, scopedTaskIds?: Set<string>) {
     const taskDelayMs = readNonNegativeInteger('CHARACTER_DIFY_TASK_DELAY_MS', 0);
     const maxTasksPerRun = readPositiveInteger('CHARACTER_DIFY_MAX_TASKS_PER_RUN', Number.POSITIVE_INFINITY);
     let processedTasks = 0;
+    let stopReason: 'drained' | 'limit' | 'pause' = 'drained';
     job.status = 'running';
     job.startedAt = job.startedAt ?? now();
     job.finishedAt = undefined;
@@ -153,10 +154,16 @@ async function runJob(job: CharacterJob, scopedTaskIds?: Set<string>) {
     emit(job);
 
     for (const task of job.tasks) {
-      if (pauseRequests.has(job.id)) break;
+      if (pauseRequests.has(job.id)) {
+        stopReason = 'pause';
+        break;
+      }
       if (scopedTaskIds && !scopedTaskIds.has(task.id)) continue;
       if (task.status !== 'queued' && task.status !== 'running') continue;
-      if (processedTasks >= maxTasksPerRun) break;
+      if (processedTasks >= maxTasksPerRun) {
+        stopReason = 'limit';
+        break;
+      }
       if (processedTasks > 0) await delay(taskDelayMs);
       await runSingleTask(job, task);
       processedTasks += 1;
@@ -167,13 +174,15 @@ async function runJob(job: CharacterJob, scopedTaskIds?: Set<string>) {
     const hasAnyPendingTask = job.tasks.some((task) => task.status === 'queued' || task.status === 'paused');
     if (hasAnyPendingTask) {
       job.status = 'paused';
-      addEvent(
-        job,
-        'info',
-        scopedTaskIds && !hasPendingScopedTask
-          ? `本次筛选范围已执行完成，共 ${processedTasks} 条；仍有未筛选任务待处理`
-          : `已达到本轮样本上限 ${processedTasks} 条，队列暂停等待下一步确认`
-      );
+      const message =
+        stopReason === 'pause'
+          ? `已按暂停请求停止，本轮已完成 ${processedTasks} 条；仍有待执行任务`
+          : stopReason === 'limit'
+            ? `已达到本轮样本上限 ${processedTasks} 条，队列暂停等待下一步确认`
+            : scopedTaskIds && !hasPendingScopedTask
+              ? `本次筛选范围已执行完成，共 ${processedTasks} 条；仍有未筛选任务待处理`
+              : `本轮执行结束，共 ${processedTasks} 条；仍有待执行任务`;
+      addEvent(job, 'info', message);
       emit(job);
     }
   } finally {

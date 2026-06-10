@@ -296,6 +296,10 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
   }, [excludedRoleFilters, generationFilter, includeRoleFilter, job, novelFilter]);
   const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
   const filteredTaskIds = useMemo(() => filteredTasks.map((task) => task.id), [filteredTasks]);
+  const pendingTaskIds = useMemo(
+    () => (job?.tasks ?? []).filter((task) => task.status === 'queued' || task.status === 'paused').map((task) => task.id),
+    [job]
+  );
   const selectedVisibleTaskIds = useMemo(
     () => selectedTaskIds.filter((taskId) => filteredTaskIds.includes(taskId)),
     [filteredTaskIds, selectedTaskIds]
@@ -486,6 +490,10 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
 
   async function startSelectedTasks() {
     await startTasks(selectedVisibleTaskIds, selectedVisibleTaskIds[0]);
+  }
+
+  async function startAllPendingTasks() {
+    await startTasks(pendingTaskIds, pendingTaskIds[0]);
   }
 
   async function startSingleTask(taskId: string) {
@@ -697,6 +705,14 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
                   {isStarting ? <Loader2 className="spin" size={14} /> : <Play size={14} />}
                   执行已选 {selectedVisibleTaskIds.length} 条
                 </button>
+                <button
+                  className="secondary-action"
+                  onClick={() => void startAllPendingTasks()}
+                  disabled={isStarting || !health?.hasCharacterDifyApiKey || pendingTaskIds.length === 0}
+                >
+                  {isStarting ? <Loader2 className="spin" size={14} /> : <Play size={14} />}
+                  继续全部未生成 {pendingTaskIds.length} 条
+                </button>
                 <button className="secondary-action" onClick={() => void pauseJob()} disabled={isPausing || job.status !== 'running'}>
                   {isPausing ? <Loader2 className="spin" size={14} /> : <PauseCircle size={14} />}
                   暂停整体任务
@@ -706,7 +722,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
                   导出飞书
                 </button>
               </div>
-              <p className="field-hint">执行范围以右侧当前筛选列表为准。</p>
+              <p className="field-hint">执行提取以右侧当前筛选列表为准；继续全部未生成会明确提交全部 queued/paused 任务。</p>
               {characterExport?.baseUrl && (
                 <a className="export-link" href={characterExport.baseUrl} target="_blank" rel="noreferrer">
                   飞书 Base：{characterExport.recordsCreated} 行，{characterExport.attachmentsUploaded} 个附件
