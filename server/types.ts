@@ -14,6 +14,17 @@ export type CharacterColumnMapping = Record<CharacterInputKey, string>;
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused';
 export type RoleAssetStatus = 'draft' | 'active' | 'disabled';
 export type RoleAssetSource = 'manual' | 'character_task' | 'import';
+export type ManagedWorkflowId = 'primary' | 'compare';
+
+export interface ManagedWorkflowConfig {
+  id: ManagedWorkflowId;
+  name: string;
+  api_key?: string;
+  console_url?: string;
+  note?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface ParsedSheet {
   name: string;

@@ -13,10 +13,10 @@
 
 ## 当前状态
 
-- Git 基线：`07bbb08 Add character Lark export`
-- 当前分支：`codex/character-continue-pending`
-- 工作区状态：已新增「角色底图管理」独立页面与 Dify 节点数据服务；工作流中「获取底图、画像」节点可迁移为网站管理数据 + `/api/workflow/role-context` 只读接口；角色底图管理支持按当前筛选列表导出飞书多维表格。
-- 已验证项：`npm test` 通过 12 个测试文件 92 个用例；`npm run build` 通过；`npm run lint` 通过。
+- Git 基线：`9ad35b8 Merge pull request #14 from fuer121/codex/character-continue-pending`
+- 当前分支：`codex/workflow-management`
+- 工作区状态：已新增「Workflow 管理」独立页面、`workflow_configs` SQLite 配置表与 `/api/workflows` 管理接口；书籍库双工作流调用链路后续优先读取 SQLite 中的 workflow 名称与 API key。
+- 已验证项：本轮 `npm test` 通过 14 个测试文件 103 个用例；`npm run build` 通过；`npm run lint` 通过。
 - PR #10 已合并功能主题：
   - 继续执行支持按筛选范围重跑已成功任务，并把真实执行 scope 写入批次日志
   - 书籍任务历史新增运行记录图片预览与双记录对比
@@ -30,18 +30,20 @@
   - 角色立绘生成结果缓存到本地，避免 Dify 临时图片 URL 过期后预览不可读
   - 角色立绘 Prompt 升级为“重绘设定图”语义，并支持更新当前历史任务 Prompt
   - 角色队列取消默认小样本上限，后续批量执行数量由筛选/勾选范围决定
-- 真实运行快照（2026-06-09 18:08:51 CST）：角色 job `wRMQnhciToy_-bP5D7GXl` 仍为 `running`，文件 `首批700张生图.xlsx`，计数为 `43 succeeded / 1 running / 656 queued / 0 failed`。
+- 真实运行快照（2026-06-10 14:13 CST）：角色 job `wRMQnhciToy_-bP5D7GXl` 仍为 `running`，文件 `首批700张生图.xlsx`，计数为 `175 succeeded / 1 running / 524 queued / 0 failed`；另有历史 job `AE6uKzan5i1zsbpyQD4k3` 为 `paused`，计数 `25 succeeded / 531 failed / 144 queued`。
 - Prompt/效果核查：当前 job 持久化 `promptText` 为 `测试 prompt`；最近成功任务的 `raw_outputs.description` 已包含“参考原图人物特征重绘、纯白背景、全身立绘、不要原场景”等语义，抽样 `/api/files/caVX41cbKmKIJVsz1JosD` 返回 200 且本地缓存可读。
 - 新发现风险：多角色 `角色名` 字段（如 `钟离无渊,燕沉`）可能生成双人白底立绘，即使描述里包含“单人”。这不是“抠图”证据，但属于后续需要确认的多角色输入策略。
-- 存量回填结果（2026-06-10 查询）：角色形象提取历史成功立绘已沉淀到角色底图管理。当前 SQLite 有 112 条有效记录，其中 67 条 `active`、35 条 `draft`、10 条 `disabled`；《第一瞳术师》81 条映射到 `book_id=215243`，《废材又怎么样？照样吊打你！》31 条按用户确认映射到《废材那又怎样》`book_id=1721648`；当前无有效 `book_id=0` 候选。若管理页继续启用/删除候选，该计数会随真实数据变化。
+- 存量回填结果（2026-06-10 14:13 CST 查询）：角色形象提取历史成功立绘已沉淀到角色底图管理。当前 SQLite 有 153 条有效记录，其中 72 条 `active`、71 条 `draft`、10 条 `disabled`；章节画像 `role_asset_profiles` 当前为 0 条。若管理页继续启用/删除候选，该计数会随真实数据变化。
 - 角色底图调用边界：当前网站已提供 `/api/workflow/role-context`，但不会自动注入书籍库生图请求；只有 Dify workflow 内部节点主动 HTTP 调用该接口时，角色底图管理数据才会参与生图。若 Dify 仍使用旧「获取底图、画像」Python 节点，则继续按旧 CDN 底图路径和 role txt 逻辑执行。
+- 本轮新增目标：新增「Workflow 管理」页面，并补齐书籍库生图按当前已查询范围的总体暂停与取消能力。
 
 ## 本轮目标
 
-- 新增「角色底图管理」入口，支持维护书籍角色底图、默认画像、章节画像与启用状态。
-- 新增 `role_assets`、`role_asset_profiles` 存储模型和管理 API，角色形象提取成功结果沉淀为 `draft` 候选。
-- 提供 Dify workflow 专用只读接口 `/api/workflow/role-context`，兼容旧节点输出 `role_url / role_list / prompt / highlight_content` 等字段。
-- 保持现有书籍库生图、双工作流对比、角色形象提取任务模型不变。
+- 新增「Workflow 管理」入口，支持管理书籍库双工作流 `primary/compare`。
+- 新增 `workflow_configs` 持久化配置，首次从环境变量 seed，保存后以 SQLite 中的名称/API key 为准。
+- 新增 `/api/workflows` 读取与更新接口，并让 `/api/health`、书籍库 Dify 调用链路读取持久化配置。
+- 保持 Dify API Base 与 responseMode 继续由环境变量控制；页面中的“工作流地址”仅作为 Dify 控制台链接记录。
+- 新增书籍库总体「暂停生图 / 取消生图」控制：范围与当前已查询任务列表一致，暂停会立即停止当前双工作流任务，取消仅移除未完成任务并保留已生成结果。
 
 ## 任务看板
 
@@ -78,6 +80,8 @@
 | IMPL-ROLE-ASSET-01 | 新增角色底图管理与 Dify 节点数据服务 | 已验证 | 实现型 Agent | Dify 节点「获取底图、画像」输入输出契约、当前角色提取任务与文件缓存 | `server/roleAssets.ts`、`server/roleAssetRoutes.ts`、`src/RoleAssetManagementPage.tsx`、`src/App.tsx`、`src/styles.css`、测试与文档 | 角色底图可新增/编辑/禁用/软删；章节画像可维护；workflow 接口鉴权后返回旧节点兼容字段；角色提取成功结果自动沉淀 draft 候选；存量成功立绘可一键回填；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 | IMPL-ROLE-ASSET-02 | 角色底图管理按当前筛选列表导出飞书 Base | 已验证 | 实现型 Agent | 用户确认导出字段为小说名称、角色立绘图、实际提取的角色名称、启用状态 | `server/lark.ts`、`server/roleAssetRoutes.ts`、`src/RoleAssetManagementPage.tsx`、相关测试 | `/api/role-assets/export/lark` 只导出前端传入的当前列表 `assetIds`；飞书表包含 `小说名称`、`角色立绘图`、`实际提取的角色名称`、`启用状态`；角色立绘图作为附件上传；空范围和非法 ID 安全失败；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支角色底图导出提交 |
 | BUG-LARK-01 | 飞书导出遇到 lark-cli TLS handshake timeout | 已验证 | 排查型 Agent -> 实现型 Agent | 用户报错 `network.timeout / TLS handshake timeout`、`server/lark.ts` | `server/lark.ts`、`server/characters.test.ts`、`.env.example` | lark-cli 网络/超时类错误自动重试；权限/参数类错误不重试；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小修复提交 |
+| IMPL-WORKFLOW-MGMT-01 | 新增书籍库双 Workflow 管理页面 | 已验证 | 实现型 Agent | 现有 `DIFY_*` / `DIFY_COMPARE_*` 环境变量、书籍库双工作流执行链路 | `workflow_configs` SQLite 表、`/api/workflows`、左侧「Workflow 管理」页面、测试与文档 | 页面可编辑 primary/compare 名称、API key、Dify 控制台地址、备注；保存后后续书籍库生图使用 SQLite 中的名称/API key；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| IMPL-BOOK-GEN-CONTROL-01 | 书籍库生图新增总体暂停与取消 | 已验证 | 实现型 Agent | 当前书籍库 `continueBook` 范围语义、双工作流 stop 逻辑、用户确认的暂停/取消语义 | `server/queue.ts`、`server/index.ts`、`src/App.tsx`、相关测试与文档 | 暂停/取消均按当前已查询范围执行；暂停会停止 running 双工作流并暂停 queued；取消移除 queued/running/paused 且保留 succeeded/failed；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 
 ## 线程索引
 
@@ -109,6 +113,8 @@
 | IMPL-BOOK-PANEL-RESIZE | 书籍库中栏/右栏拖拽调宽 | 实现线程 | 实现型 Agent | 用户浏览器批注、`book-main-grid`、右侧任务详情宽度 | 拖拽分隔条可调整并持久化详情宽度，窄屏不破版 | 已完成 |
 | IMPL-ROLE-ASSET-MANAGER | 角色底图管理与 workflow 数据服务 | 实现线程 | 实现型 Agent | Dify 节点输入输出、角色任务成功结果、`/api/files` 文件服务 | 管理页/API/只读 workflow 接口实现并通过测试，文档同步 | 已完成 |
 | DATA-ROLE-ASSET-BACKFILL | 回填存量角色立绘到角色底图管理 | 数据迁移线程 | 总控 Agent | `character_job_tasks` 成功任务、`role_assets`、用户确认书籍别名 | 成功立绘进入 `draft` 候选，书籍 ID 映射正确，无 `book_id=0` 有效记录 | 已完成 |
+| IMPL-WORKFLOW-MGMT | 书籍库双 Workflow 配置管理 | 实现线程 | 实现型 Agent | `server/dify.ts`、`/api/health`、侧边栏工作流展示 | 配置持久化、管理页、真实调用链路读取配置并通过测试 | 已完成 |
+| IMPL-BOOK-GEN-CONTROL | 书籍库总体暂停与取消 | 实现线程 | 实现型 Agent | 当前书籍库筛选范围、`continueBook`、双工作流 stop refs | 暂停/取消接口与按钮可用，范围一致，自动化验证通过 | 已完成 |
 
 ## 决策记录
 
@@ -192,15 +198,21 @@
 6. 角色任务 `wRMQnhciToy_-bP5D7GXl` 当前排查结果：`/api/character-jobs` 显示 `paused`，计数为 `171 succeeded / 529 queued / 0 running / 0 failed`；最近一次事件为“本轮完成 59 条后暂停”，不是正在后台执行。根因不是队列仍在跑，而是用户按筛选范围执行后，未命中的 queued 行仍留在 job 中，页面容易被理解为“排队但不执行”。
 7. 角色页新增“继续全部未生成”按钮：只收集当前 job 的 `queued/paused` 任务 ID 并显式提交 `/api/character-jobs/:id/start`，不会包含已成功或失败行，也不会改变“执行提取/导出飞书按当前筛选范围”的既有规则。
 8. 角色队列结束日志已细分：手动暂停记录“已按暂停请求停止”，显式样本上限记录“已达到本轮样本上限”，筛选范围跑完但仍有未筛选任务时记录“本次筛选范围已执行完成”，避免后续继续把范围完成误判为限流中断。
+9. Workflow 管理本期只管理书籍库双工作流 `primary/compare`；质量判断、角色形象提取、角色底图 role-context 不纳入本页。
+10. Workflow 管理页面保存后的名称和 API key 写入 SQLite `workflow_configs`，后续书籍库生图调用优先读取 SQLite；`.env.local` 中 `DIFY_*` / `DIFY_COMPARE_*` 只作为首次 seed 和 API Base/responseMode 兜底来源。
+11. Workflow 管理的“工作流地址”字段定义为 Dify 控制台地址，只用于记录和跳转，不参与后端 `/workflows/run` API 请求。
+12. 书籍库总体暂停/取消的控制范围固定为当前已点击“查询”后生效的任务列表范围，与“执行生图”一致，不使用未查询的筛选草稿。
+13. 书籍库总体取消不新增 `canceled` 状态；取消仅停止并移除当前范围内 `queued/running/paused` 任务，保留 `succeeded/failed` 任务和历史运行记录。
 
 ## Git 记录
 
-- HEAD：`59d7209 Merge pull request #13 from fuer121/codex/role-stable`
-- 当前分支：`codex/character-continue-pending`
+- HEAD：`9ad35b8 Merge pull request #14 from fuer121/codex/character-continue-pending`
+- 主线基线：`origin/main` 已到 `9ad35b8 Merge pull request #14 from fuer121/codex/character-continue-pending`
+- 当前分支：`codex/workflow-management`
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：角色形象提取“继续全部未生成”入口、角色队列结束原因日志、执行范围测试与文档同步。
+- 本轮提交范围：Workflow 管理页面、`workflow_configs` SQLite 配置、`/api/workflows`、书籍库 Dify 调用读取持久化名称/API key、书籍库总体暂停/取消、测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单

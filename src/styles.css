@@ -2018,9 +2018,16 @@ select {
 
 .filter-action-row .generate-filter-button,
 .filter-action-row .continue-filter-button,
+.filter-action-row .pause-filter-button,
+.filter-action-row .cancel-filter-button,
 .filter-action-row .export-filter-button {
   flex: 0 0 118px;
   min-height: 44px;
+}
+
+.cancel-filter-button {
+  border-color: #f0c7c2;
+  color: #b42318;
 }
 
 .book-task-table-wrap {
@@ -2713,6 +2720,22 @@ select {
   font-weight: 700;
 }
 
+.workflow-result-meta {
+  color: #657084;
+  display: grid;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 4px;
+  line-height: 1.45;
+}
+
+.workflow-result-meta span {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
 .workflow-image-list {
   display: grid;
   gap: 8px;
@@ -3250,6 +3273,158 @@ select {
   font-weight: 800;
   justify-content: center;
   min-height: 220px;
+}
+
+.workflow-management-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+}
+
+.workflow-management-header {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 24px;
+}
+
+.workflow-management-header h1 {
+  color: #172033;
+  font-size: 28px;
+  margin: 8px 0;
+}
+
+.workflow-management-header p {
+  color: #657084;
+  line-height: 1.7;
+  margin: 0;
+  max-width: 760px;
+}
+
+.section-eyebrow {
+  align-items: center;
+  color: #2870ea;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 850;
+  gap: 8px;
+}
+
+.workflow-config-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workflow-config-card {
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.workflow-card-title {
+  align-items: flex-start;
+  border-bottom: 1px solid #edf1f6;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-bottom: 12px;
+}
+
+.workflow-card-title div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workflow-card-title span {
+  color: #657084;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.workflow-card-title strong {
+  color: #172033;
+  font-size: 20px;
+}
+
+.workflow-card-title a {
+  align-items: center;
+  background: #eef5ff;
+  border-radius: 10px;
+  color: #2870ea;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.workflow-config-card label {
+  color: #657084;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 850;
+  gap: 8px;
+}
+
+.workflow-config-card input,
+.workflow-config-card textarea {
+  background: #fff;
+  border: 1px solid #d9e2ef;
+  border-radius: 12px;
+  color: #172033;
+  font: inherit;
+  font-weight: 750;
+  padding: 11px 12px;
+  width: 100%;
+}
+
+.workflow-config-card textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.workflow-card-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-top: 6px;
+}
+
+.workflow-card-footer small {
+  color: #657084;
+  font-weight: 750;
+}
+
+.workflow-card-footer button {
+  align-items: center;
+  background: #2870ea;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 900;
+  gap: 8px;
+  padding: 11px 16px;
+}
+
+.workflow-card-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .quality-right {
@@ -3827,6 +4002,8 @@ select {
 
   .filter-action-row .generate-filter-button,
   .filter-action-row .continue-filter-button,
+  .filter-action-row .pause-filter-button,
+  .filter-action-row .cancel-filter-button,
   .filter-action-row .export-filter-button {
     flex-basis: auto;
     width: 100%;
@@ -3905,7 +4082,8 @@ select {
   .right-panel,
   .books-layout,
   .books-detail,
-  .quality-layout {
+  .quality-layout,
+  .workflow-config-grid {
     grid-template-columns: 1fr;
   }
 

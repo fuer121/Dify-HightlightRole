@@ -1,5 +1,6 @@
 import type { BatchTask, DifyRunResult, ResultFile, WorkflowResult } from './types.js';
 import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
+import { listWorkflowConfigs } from './workflowConfigs.js';
 
 interface DifyErrorOptions {
   retryable?: boolean;
@@ -34,22 +35,13 @@ function apiUrl(pathname: string, apiBase = process.env.DIFY_API_BASE ?? 'http:/
 export function getDifyWorkflowConfigs(): DifyWorkflowConfig[] {
   const primaryApiBase = process.env.DIFY_API_BASE ?? 'http://dify.qmniu.com/v1';
   const primaryResponseMode = process.env.DIFY_RESPONSE_MODE || 'streaming';
-  return [
-    {
-      id: 'primary',
-      name: process.env.DIFY_WORKFLOW_NAME ?? '线上工作流',
-      apiBase: primaryApiBase,
-      apiKey: process.env.DIFY_API_KEY,
-      responseMode: primaryResponseMode
-    },
-    {
-      id: 'compare',
-      name: process.env.DIFY_COMPARE_WORKFLOW_NAME ?? '对照工作流',
-      apiBase: process.env.DIFY_COMPARE_API_BASE ?? primaryApiBase,
-      apiKey: process.env.DIFY_COMPARE_API_KEY,
-      responseMode: process.env.DIFY_COMPARE_RESPONSE_MODE || primaryResponseMode
-    }
-  ];
+  return listWorkflowConfigs().map((workflow) => ({
+    id: workflow.id,
+    name: workflow.name,
+    apiBase: workflow.id === 'compare' ? process.env.DIFY_COMPARE_API_BASE ?? primaryApiBase : primaryApiBase,
+    apiKey: workflow.api_key,
+    responseMode: workflow.id === 'compare' ? process.env.DIFY_COMPARE_RESPONSE_MODE || primaryResponseMode : primaryResponseMode
+  }));
 }
 
 function configuredDifyWorkflowConfigs() {

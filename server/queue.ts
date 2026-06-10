@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { Batch, BatchLogEvent, BatchTask, ColumnMapping, DifyRunResult, ParsedWorkbook, WorkflowResult } from './types.js';
+import type { Batch, BatchLogEvent, BatchTask, ColumnMapping, DifyRunResult, ParsedWorkbook, TaskStatus, WorkflowResult } from './types.js';
 import { compileRows } from './workbooks.js';
 import {
   applyDifyResult,
@@ -768,6 +768,100 @@ export function continueBook(bookId: number, filters: BookTaskFilters = {}) {
   addEvent(batch, 'info', `开始执行当前任务清单 ${queuedCount} 个任务（范围：${continueFilterSummary(filters)}）`);
   emit(batch);
   void runBatchLoop(batch, runnableIds);
+  return batch;
+}
+
+function requireBookBatch(filters: BookTaskFilters, action: string) {
+  const taskListId = filters.batchId && filters.batchId !== 'all' ? filters.batchId : undefined;
+  if (!taskListId) {
+    throw new Error(`请先选择一个上传文档任务清单后再${action}`);
+  }
+  const batch = batches.get(taskListId);
+  if (!batch) throw new Error('任务清单不存在，请刷新后重试');
+  return { batch, taskListId };
+}
+
+function scopedBookTaskIds(bookId: number, filters: BookTaskFilters, statuses: TaskStatus[]) {
+  const allowed = new Set<TaskStatus>(statuses);
+  return new Set(
+    listBookTasks(bookId, filters)
+      .filter((task) => task.batch_id === filters.batchId)
+      .filter((task) => allowed.has(task.status))
+      .filter((task) => !isValidationFailed(task))
+      .map((task) => task.id)
+  );
+}
+
+async function stopRunningTask(batch: Batch, task: BatchTask, label: string, bestEffort: boolean) {
+  task.stop_requested_at = task.stop_requested_at ?? now();
+  task.pause_reason = 'stop';
+  task.progress_label = label;
+  const refs = workflowTaskRefs(task);
+  if (refs.length === 0) return;
+  try {
+    await Promise.all(refs.map((ref) => workflowStopper(ref.taskId, batch.id, ref.workflowId)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '停止任务失败';
+    addEvent(batch, 'error', `第 ${task.row_no} 行停止失败：${message}`, task.id);
+    if (!bestEffort) throw error;
+  }
+}
+
+export async function pauseBookTasks(bookId: number, filters: BookTaskFilters = {}) {
+  const { batch, taskListId } = requireBookBatch(filters, '暂停生图');
+  const scopedIds = scopedBookTaskIds(bookId, { ...filters, batchId: taskListId }, ['queued', 'running']);
+  if (scopedIds.size === 0) throw new Error('当前任务列表没有可暂停的任务');
+
+  batch.pauseRequested = true;
+  let pausedCount = 0;
+  let stoppingCount = 0;
+  for (const task of batch.tasks) {
+    if (!scopedIds.has(task.id)) continue;
+    if (task.status === 'queued') {
+      task.status = 'paused';
+      task.progress_percent = 0;
+      task.progress_label = '已暂停';
+      task.pause_reason = 'batch';
+      pausedCount += 1;
+    } else if (task.status === 'running') {
+      stoppingCount += 1;
+      await stopRunningTask(batch, task, '正在停止 Dify 任务', false);
+    }
+  }
+
+  if (batch.status !== 'running') {
+    batch.status = 'paused';
+  }
+  addEvent(batch, 'info', `已请求暂停当前任务列表范围：停止中 ${stoppingCount} 个，已暂停 ${pausedCount} 个`);
+  emit(batch);
+  return batch;
+}
+
+export async function cancelBookTasks(bookId: number, filters: BookTaskFilters = {}) {
+  const { batch, taskListId } = requireBookBatch(filters, '取消生图');
+  const scopedIds = scopedBookTaskIds(bookId, { ...filters, batchId: taskListId }, ['queued', 'running', 'paused']);
+  if (scopedIds.size === 0) throw new Error('当前任务列表没有可取消的未完成任务');
+
+  let canceledCount = 0;
+  let stoppedRunning = false;
+  for (const task of [...batch.tasks]) {
+    if (!scopedIds.has(task.id)) continue;
+    if (task.status === 'running') {
+      stoppedRunning = true;
+      await stopRunningTask(batch, task, '取消前停止 Dify 任务', true);
+    }
+    markTaskDeleted(task.id);
+    canceledCount += 1;
+  }
+  batch.tasks = batch.tasks.filter((task) => !scopedIds.has(task.id));
+  batch.pauseRequested = stoppedRunning;
+  if (!batch.tasks.some((task) => task.status === 'running')) {
+    batch.status = hasAnyUnfinishedWork(batch) ? 'idle' : 'completed';
+    batch.finishedAt = batch.status === 'completed' ? now() : undefined;
+  }
+  addEvent(batch, 'info', `已取消当前任务列表范围内 ${canceledCount} 个未完成任务，已生成结果保留`);
+  completeIfDone(batch);
+  emit(batch);
   return batch;
 }
 

@@ -8,6 +8,7 @@ import type { ColumnMapping, ParsedWorkbook } from './types.js';
 import {
   addManualBookTask,
   appendWorkbookTasksToBook,
+  cancelBookTasks,
   continueBook,
   createBatch,
   deleteBatch,
@@ -21,6 +22,7 @@ import {
   listTasksForBook,
   markExported,
   pauseBatch,
+  pauseBookTasks,
   pauseStoredTask,
   renameBatch,
   renameBook,
@@ -40,6 +42,7 @@ import { registerQualityRoutes } from './quality.js';
 import { registerCharacterRoutes } from './characterRoutes.js';
 import { getDifyWorkflowConfigs } from './dify.js';
 import { registerRoleAssetRoutes } from './roleAssetRoutes.js';
+import { registerWorkflowRoutes } from './workflowRoutes.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -452,6 +455,24 @@ app.post('/api/books/:bookId/continue', (req, res) => {
   res.json(serializeBatch(batch));
 });
 
+app.post(
+  '/api/books/:bookId/pause',
+  asyncHandler(async (req, res) => {
+    const bookId = parseBookIdParam(req.params.bookId);
+    const batch = await pauseBookTasks(bookId, parseBookTaskFilters(req.query));
+    res.json(serializeBatch(batch));
+  })
+);
+
+app.post(
+  '/api/books/:bookId/cancel',
+  asyncHandler(async (req, res) => {
+    const bookId = parseBookIdParam(req.params.bookId);
+    const batch = await cancelBookTasks(bookId, parseBookTaskFilters(req.query));
+    res.json(serializeBatch(batch));
+  })
+);
+
 app.get('/api/tasks/:taskId/runs', (req, res) => {
   const taskId = routeParam(req.params.taskId);
   if (!taskId) {
@@ -559,6 +580,7 @@ registerCharacterRoutes(app, {
   getWorkbook: (workbookId) => workbooks.get(workbookId)
 });
 registerRoleAssetRoutes(app);
+registerWorkflowRoutes(app);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   void _next;

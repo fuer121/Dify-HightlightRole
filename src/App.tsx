@@ -21,17 +21,19 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  Workflow,
   XCircle
 } from 'lucide-react';
 import { getRunIsValidValue } from './runIsValid';
 import { CharacterExtractionPage } from './CharacterExtractionPage';
 import { RoleAssetManagementPage } from './RoleAssetManagementPage';
+import { WorkflowManagementPage } from './WorkflowManagementPage';
 
 type RequiredInputKey = 'book_id' | 'paragraph_content' | 'chapter_sort';
 type Mapping = Record<RequiredInputKey, string>;
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused';
 type StatusFilter = TaskStatus | 'all';
-type AppPage = 'books' | 'quality' | 'characters' | 'role-assets';
+type AppPage = 'books' | 'quality' | 'characters' | 'role-assets' | 'workflows';
 type ImagePresenceFilter = 'all' | 'yes' | 'no';
 type ValueStatusFilter = 'all' | 'valuable' | 'not_valuable' | 'unknown';
 type RangeFilterMode = 'chapter' | 'row';
@@ -649,13 +651,15 @@ export function App() {
         ? 'characters'
         : initialPageParam === 'role-assets'
           ? 'role-assets'
-          : 'books';
+          : initialPageParam === 'workflows'
+            ? 'workflows'
+            : 'books';
   const [page, setPage] = useState<AppPage>(initialPage);
   const [difyWorkflowName, setDifyWorkflowName] = useState('LL-段落高光生图-效果测试');
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  useEffect(() => {
-    fetch('/api/health')
+  function refreshDifyWorkflowName() {
+    return fetch('/api/health')
       .then((response) => readJson<AppHealthConfig>(response))
       .then((payload) => {
         if (payload.config?.difyWorkflows?.length) {
@@ -669,12 +673,16 @@ export function App() {
       .catch(() => {
         setDifyWorkflowName('LL-段落高光生图-效果测试');
       });
+  }
+
+  useEffect(() => {
+    void refreshDifyWorkflowName();
   }, []);
 
   function updatePage(nextPage: AppPage) {
     setPage(nextPage);
     const url = new URL(window.location.href);
-    if (nextPage === 'quality' || nextPage === 'characters' || nextPage === 'role-assets') {
+    if (nextPage === 'quality' || nextPage === 'characters' || nextPage === 'role-assets' || nextPage === 'workflows') {
       url.searchParams.set('page', nextPage);
     } else {
       url.searchParams.delete('page');
@@ -704,6 +712,14 @@ export function App() {
           difyWorkflowName={difyWorkflowName}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        />
+      ) : page === 'workflows' ? (
+        <WorkflowWorkspace
+          onNavigate={updatePage}
+          difyWorkflowName={difyWorkflowName}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onWorkflowSaved={() => void refreshDifyWorkflowName()}
         />
       ) : (
         <BooksManagementPage
@@ -766,6 +782,10 @@ function WorkspaceSidebar({
         <button className={page === 'role-assets' ? 'active' : ''} onClick={() => onChange('role-assets')} title="角色底图管理">
           <Database size={16} />
           <span>角色底图管理</span>
+        </button>
+        <button className={page === 'workflows' ? 'active' : ''} onClick={() => onChange('workflows')} title="Workflow 管理">
+          <Workflow size={16} />
+          <span>Workflow 管理</span>
         </button>
       </nav>
       {!isCollapsed && children}
@@ -870,6 +890,40 @@ function RoleAssetWorkspace({
       </WorkspaceSidebar>
       <section className="workspace-content quality-workspace-content">
         <RoleAssetManagementPage />
+      </section>
+    </div>
+  );
+}
+
+function WorkflowWorkspace({
+  onNavigate,
+  difyWorkflowName,
+  isSidebarCollapsed,
+  onToggleSidebar,
+  onWorkflowSaved
+}: {
+  onNavigate: (page: AppPage) => void;
+  difyWorkflowName: string;
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+  onWorkflowSaved: () => void;
+}) {
+  return (
+    <div className={`workspace-frame ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <WorkspaceSidebar
+        page="workflows"
+        onChange={onNavigate}
+        difyWorkflowName={difyWorkflowName}
+        isCollapsed={isSidebarCollapsed}
+        onToggle={onToggleSidebar}
+      >
+        <div className="sidebar-note">
+          <Workflow size={16} />
+          <span>管理书籍库主工作流与对照工作流配置。</span>
+        </div>
+      </WorkspaceSidebar>
+      <section className="workspace-content quality-workspace-content">
+        <WorkflowManagementPage onSaved={onWorkflowSaved} />
       </section>
     </div>
   );
@@ -1573,15 +1627,6 @@ export function BatchWorkflowPage() {
                 ) : (
                   <ImagePlaceholder task={selectedTask} />
                 )}
-                <div className="result-info">
-                  <h2>{selectedTask.title || '暂无标题'}</h2>
-                  <div className="result-meta">
-                    <span>
-                      is_valid：<RawValue value={selectedTask.is_valid} compact />
-                    </span>
-                    <span>角色：{selectedTask.role?.join('、') || '-'}</span>
-                  </div>
-                </div>
                 {selectedTask.paragraph_description && (
                   <div className="description-output">
                     <strong>生成段落描述</strong>
@@ -1723,6 +1768,21 @@ function workflowOutputString(result: WorkflowResult, key: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function workflowOutputRoles(result: WorkflowResult) {
+  if (result.role?.length) return result.role;
+  const rawRole = asObject(result.raw_outputs)?.role ?? asObject(result.raw_outputs)?.role_list;
+  if (Array.isArray(rawRole)) {
+    return rawRole.map((role) => String(role).trim()).filter(Boolean);
+  }
+  if (typeof rawRole === 'string' && rawRole.trim()) {
+    return rawRole
+      .split(/[、,，]/)
+      .map((role) => role.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function workflowResultTitle(result: WorkflowResult) {
   if (result.title) return result.title;
   const title = workflowOutputString(result, 'title');
@@ -1780,6 +1840,13 @@ function WorkflowResultCards({
             <div className="run-thumb-empty">{result.status === 'failed' ? '未生成图片' : result.status === 'running' ? '生成中' : '暂无图片'}</div>
           )}
           <h3>{workflowResultTitle(result)}</h3>
+          <div className="workflow-result-meta">
+            <span>
+              is_valid：<RawValue value={result.is_valid} compact />
+            </span>
+            <span>角色：{workflowOutputRoles(result).join('、') || '-'}</span>
+            <span>耗时：{result.elapsed_seconds !== undefined ? `${result.elapsed_seconds}s` : '-'}</span>
+          </div>
           {workflowResultDescription(result) && <p>{workflowResultDescription(result)}</p>}
           {result.error && (
             <div className="task-error">
@@ -1970,6 +2037,8 @@ function BooksManagementPage({
   });
   const [isLoadingTasks, setLoadingTasks] = useState(false);
   const [isContinuing, setContinuing] = useState(false);
+  const [isPausingGeneration, setPausingGeneration] = useState(false);
+  const [isCancelingGeneration, setCancelingGeneration] = useState(false);
   const [isRunLogOpen, setRunLogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightboxFile, setLightboxFile] = useState<ResultFile | null>(null);
@@ -2373,6 +2442,46 @@ function BooksManagementPage({
       setError(continueError instanceof Error ? continueError.message : '继续执行失败');
     } finally {
       setContinuing(false);
+    }
+  }
+
+  async function controlBookGeneration(action: 'pause' | 'cancel') {
+    if (!selectedBook) return;
+    if (selectedBatchId === 'all') {
+      setError(`请先选择一个上传文档任务清单后再${action === 'pause' ? '暂停' : '取消'}生图`);
+      return;
+    }
+    if (!selectedBatch) {
+      setError('当前任务清单不存在，请刷新后重试');
+      return;
+    }
+    if (
+      action === 'cancel' &&
+      !window.confirm('确认取消当前筛选范围内未完成任务？仅取消当前筛选范围内未完成任务，已生成结果保留。')
+    ) {
+      return;
+    }
+    const setBusy = action === 'pause' ? setPausingGeneration : setCancelingGeneration;
+    setBusy(true);
+    setError(null);
+    try {
+      const params = createTaskQueryParams(appliedTaskQueryState, 1, taskPageSize, selectedBatchId);
+      params.delete('page');
+      params.delete('pageSize');
+      const query = params.toString();
+      const batch = await fetch(`/api/books/${selectedBook.book_id}/${action}${query ? `?${query}` : ''}`, { method: 'POST' }).then((response) => readJson<Batch>(response));
+      const nextPageSize = taskListPageSize(batch.tasks.filter((task) => task.input.book_id === selectedBook.book_id).length);
+      const nextQueryState = taskQueryStateForScope(selectedBook.book_id, batch.id);
+      setSelectedBatchId(batch.id);
+      setTaskPageSize(nextPageSize);
+      setTaskPage(1);
+      await loadBooks(selectedBook.book_id);
+      await loadBookBatches(selectedBook.book_id, batch.id);
+      await loadBookTasks(selectedBook.book_id, 1, batch.id, {}, nextPageSize, nextQueryState);
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : `${action === 'pause' ? '暂停' : '取消'}生图失败`);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -2899,7 +3008,16 @@ function BooksManagementPage({
               <button
                 className="continue-filter-button secondary-action"
                 onClick={() => void continueTasks()}
-                disabled={!selectedBook || !selectedBatch || isAllTaskListView || selectedBatchIsRunning || isContinuing || taskPagination.runnableTotal === 0}
+                disabled={
+                  !selectedBook ||
+                  !selectedBatch ||
+                  isAllTaskListView ||
+                  selectedBatchIsRunning ||
+                  isContinuing ||
+                  isPausingGeneration ||
+                  isCancelingGeneration ||
+                  taskPagination.runnableTotal === 0
+                }
                 title={
                   !selectedBatch || isAllTaskListView
                     ? '请先选择一个上传文档任务清单后再执行生图'
@@ -2910,6 +3028,32 @@ function BooksManagementPage({
               >
                 {isContinuing ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
                 执行生图
+              </button>
+              <button
+                className="pause-filter-button secondary-action"
+                onClick={() => void controlBookGeneration('pause')}
+                disabled={!selectedBook || !selectedBatch || isAllTaskListView || isPausingGeneration || isCancelingGeneration}
+                title={
+                  !selectedBatch || isAllTaskListView
+                    ? '请先选择一个上传文档任务清单后再暂停生图'
+                    : `立即停止当前任务列表范围内的执行中任务，并暂停未开始任务：${continueScopeText}`
+                }
+              >
+                {isPausingGeneration ? <Loader2 className="spin" size={16} /> : <Pause size={16} />}
+                暂停生图
+              </button>
+              <button
+                className="cancel-filter-button secondary-action"
+                onClick={() => void controlBookGeneration('cancel')}
+                disabled={!selectedBook || !selectedBatch || isAllTaskListView || isPausingGeneration || isCancelingGeneration}
+                title={
+                  !selectedBatch || isAllTaskListView
+                    ? '请先选择一个上传文档任务清单后再取消生图'
+                    : `取消当前任务列表范围内未完成任务，已生成结果保留：${continueScopeText}`
+                }
+              >
+                {isCancelingGeneration ? <Loader2 className="spin" size={16} /> : <XCircle size={16} />}
+                取消生图
               </button>
               <button
                 className="export-filter-button secondary-action"
@@ -3074,16 +3218,6 @@ function BooksManagementPage({
                 </div>
                 <ProgressCell task={selectedTask} wide />
                 <WorkflowResultCards results={workflowResultsForItem(selectedTask)} onPreview={setLightboxFile} />
-                <div className="result-info">
-                  <h2>{selectedTask.title || '暂无标题'}</h2>
-                  <div className="result-meta">
-                    <span>
-                      is_valid：<RawValue value={selectedTask.is_valid} compact />
-                    </span>
-                    <span>角色：{selectedTask.role?.join('、') || '-'}</span>
-                    {selectedTask.elapsed_seconds ? <span>耗时：{selectedTask.elapsed_seconds}s</span> : null}
-                  </div>
-                </div>
                 {selectedTask.paragraph_description && (
                   <div className="description-output">
                     <strong>生图描述</strong>
