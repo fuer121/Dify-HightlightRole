@@ -185,6 +185,7 @@ describe('character jobs', () => {
     const scoped = getCharacterJob(job.id)!;
     expect(processedRows).toEqual([3]);
     expect(scoped.tasks.map((task) => task.status)).toEqual(['queued', 'succeeded']);
+    expect(scoped.events[0]?.message).toContain('本次筛选范围已执行完成');
   });
 
   it('exports only requested character tasks to Lark with portrait and source image attachments', async () => {

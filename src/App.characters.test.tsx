@@ -660,4 +660,141 @@ describe('App characters page routing', () => {
 
     expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-yz', 'task-xr'] });
   });
+
+  it('continues all not generated character tasks with explicit task ids', async () => {
+    let startRequestBody: string | null = null;
+    characterJobs = [
+      {
+        id: 'job-continue-pending',
+        file_name: '角色任务.xlsx',
+        sheet_name: '执行结果7',
+        status: 'paused',
+        created_at: '2026-06-09T00:00:00.000Z',
+        updated_at: '2026-06-09T00:00:00.000Z',
+        task_count: 4,
+        queued_count: 1,
+        running_count: 0,
+        succeeded_count: 1,
+        failed_count: 1,
+        paused_count: 1
+      }
+    ];
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/health')) {
+        return jsonResponse({ config: { characterDifyWorkflowName: '角色工作流', hasCharacterDifyApiKey: true } });
+      }
+      if (url.endsWith('/api/character-jobs')) return jsonResponse({ jobs: characterJobs });
+      if (url.endsWith('/api/character-jobs/job-continue-pending/start')) {
+        startRequestBody = typeof init?.body === 'string' ? init.body : null;
+        return jsonResponse({
+          id: 'job-continue-pending',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: 'prompt',
+          status: 'running',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-jobs/job-continue-pending')) {
+        return jsonResponse({
+          id: 'job-continue-pending',
+          workbookId: 'workbook-1',
+          fileName: '角色任务.xlsx',
+          sheetName: '执行结果7',
+          mapping: {},
+          promptText: 'prompt',
+          status: 'paused',
+          createdAt: '2026-06-09T00:00:00.000Z',
+          updatedAt: '2026-06-09T00:00:00.000Z',
+          tasks: [
+            {
+              id: 'task-done',
+              job_id: 'job-continue-pending',
+              row_no: 2,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 1,
+                chapter_name: '第1章',
+                paragraph_content: '已成功',
+                paragraph_image_url: 'https://cdn.example.com/a.png',
+                role_name: '云筝'
+              },
+              status: 'succeeded',
+              attempts: 1,
+              portrait_files: []
+            },
+            {
+              id: 'task-queued',
+              job_id: 'job-continue-pending',
+              row_no: 3,
+              input: {
+                novel_name: '第一瞳术师',
+                chapter_sort: 2,
+                chapter_name: '第2章',
+                paragraph_content: '排队中',
+                paragraph_image_url: 'https://cdn.example.com/b.png',
+                role_name: '容烁'
+              },
+              status: 'queued',
+              attempts: 0,
+              portrait_files: []
+            },
+            {
+              id: 'task-paused',
+              job_id: 'job-continue-pending',
+              row_no: 4,
+              input: {
+                novel_name: '废材那又怎样',
+                chapter_sort: 3,
+                chapter_name: '第3章',
+                paragraph_content: '已暂停',
+                paragraph_image_url: 'https://cdn.example.com/c.png',
+                role_name: '谭浮'
+              },
+              status: 'paused',
+              attempts: 0,
+              portrait_files: []
+            },
+            {
+              id: 'task-failed',
+              job_id: 'job-continue-pending',
+              row_no: 5,
+              input: {
+                novel_name: '废材那又怎样',
+                chapter_sort: 4,
+                chapter_name: '第4章',
+                paragraph_content: '失败',
+                paragraph_image_url: 'https://cdn.example.com/d.png',
+                role_name: '陆征'
+              },
+              status: 'failed',
+              attempts: 1,
+              portrait_files: []
+            }
+          ],
+          events: []
+        });
+      }
+      if (url.endsWith('/api/character-tasks/task-done/runs')) return jsonResponse({ runs: [] });
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+
+    const continueAllButton = Array.from(container.querySelectorAll('button')).find((item) => item.textContent?.includes('继续全部未生成'))!;
+    await act(async () => {
+      continueAllButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(JSON.parse(startRequestBody ?? '{}')).toEqual({ taskIds: ['task-queued', 'task-paused'] });
+  });
 });

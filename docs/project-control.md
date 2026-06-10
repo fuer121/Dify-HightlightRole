@@ -14,7 +14,7 @@
 ## 当前状态
 
 - Git 基线：`07bbb08 Add character Lark export`
-- 当前分支：`codex/role-stable`
+- 当前分支：`codex/character-continue-pending`
 - 工作区状态：已新增「角色底图管理」独立页面与 Dify 节点数据服务；工作流中「获取底图、画像」节点可迁移为网站管理数据 + `/api/workflow/role-context` 只读接口；角色底图管理支持按当前筛选列表导出飞书多维表格。
 - 已验证项：`npm test` 通过 12 个测试文件 92 个用例；`npm run build` 通过；`npm run lint` 通过。
 - PR #10 已合并功能主题：
@@ -74,6 +74,7 @@
 | IMPL-UI-02 | 双工作流结果卡并排展示并隐藏调试字段 | 已验证 | 实现型 Agent | 用户浏览器批注、右侧任务详情 workflow cards | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 主/对照 workflow 在任务详情中优先并排展示；隐藏 `workflow_run_id/dify_task_id` 对应的“运行/任务”字段；保留 workflow 名称、状态、图片/生成中、标题、描述和错误；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 | IMPL-UI-03 | 书籍库任务列表与详情模块支持拖拽调宽 | 已验证 | 实现型 Agent | 用户浏览器批注、书籍库中栏任务列表与右侧任务详情 | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 中栏与右栏之间提供拖拽分隔条；拖拽后右侧详情宽度持久化；窄屏自动回退单列布局；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 | IMPL-CHAR-10 | 角色形象提取按当前筛选范围导出飞书 Base | 已验证 | 实现型 Agent | 用户确认导出范围为当前筛选，图片字段为立绘附件 + 原图附件 | `server/lark.ts`、`server/characterRoutes.ts`、`src/CharacterExtractionPage.tsx`、相关测试 | `/api/character-jobs/:id/export/lark` 只导出传入 `taskIds`；前端导出按钮提交当前筛选命中任务；飞书表包含角色字段并上传生成立绘与原段落图片附件；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支角色导出提交 |
+| IMPL-CHAR-11 | 修正角色任务筛选跑完后仍有 queued 造成的“假中断”感知 | 已验证 | 排查型 Agent -> 实现型 Agent | 真实 job `wRMQnhciToy_-bP5D7GXl`、`/api/character-jobs`、SQLite 队列状态、前端执行范围规则 | `src/CharacterExtractionPage.tsx`、`server/characters.ts`、相关测试 | 保留“执行提取=当前筛选命中 `taskIds`”规则；新增“继续全部未生成”按钮显式提交全部 `queued/paused` 任务；后端结束日志区分筛选范围完成、手动暂停和样本上限；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小修复提交 |
 | IMPL-ROLE-ASSET-01 | 新增角色底图管理与 Dify 节点数据服务 | 已验证 | 实现型 Agent | Dify 节点「获取底图、画像」输入输出契约、当前角色提取任务与文件缓存 | `server/roleAssets.ts`、`server/roleAssetRoutes.ts`、`src/RoleAssetManagementPage.tsx`、`src/App.tsx`、`src/styles.css`、测试与文档 | 角色底图可新增/编辑/禁用/软删；章节画像可维护；workflow 接口鉴权后返回旧节点兼容字段；角色提取成功结果自动沉淀 draft 候选；存量成功立绘可一键回填；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 | IMPL-ROLE-ASSET-02 | 角色底图管理按当前筛选列表导出飞书 Base | 已验证 | 实现型 Agent | 用户确认导出字段为小说名称、角色立绘图、实际提取的角色名称、启用状态 | `server/lark.ts`、`server/roleAssetRoutes.ts`、`src/RoleAssetManagementPage.tsx`、相关测试 | `/api/role-assets/export/lark` 只导出前端传入的当前列表 `assetIds`；飞书表包含 `小说名称`、`角色立绘图`、`实际提取的角色名称`、`启用状态`；角色立绘图作为附件上传；空范围和非法 ID 安全失败；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支角色底图导出提交 |
 | BUG-LARK-01 | 飞书导出遇到 lark-cli TLS handshake timeout | 已验证 | 排查型 Agent -> 实现型 Agent | 用户报错 `network.timeout / TLS handshake timeout`、`server/lark.ts` | `server/lark.ts`、`server/characters.test.ts`、`.env.example` | lark-cli 网络/超时类错误自动重试；权限/参数类错误不重试；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小修复提交 |
@@ -188,15 +189,18 @@
 3. 角色形象提取导出飞书时，`角色名` 列优先使用本次立绘实际提取出的 `extracted_role_name`；只有缺失时才回退 Excel 原始 `角色名` 字段，避免多角色原图字段污染导出表。
 4. 飞书导出中的 `lark-cli` 调用增加网络类错误自动重试，默认 `LARK_CLI_RETRIES=2`、`LARK_CLI_RETRY_DELAY_MS=1500`；仅匹配 `network/timeout/TLS handshake timeout/ECONNRESET/ETIMEDOUT/EAI_AGAIN` 等临时网络错误，不对权限、字段、参数错误重试。
 5. 飞书导出记录创建成功后，附件上传采用尽力策略：单个图片附件在重试后仍失败时不再中断整次导出，返回 `attachmentsFailed` 供前端提示；Base、表、记录创建失败仍然按失败处理。
+6. 角色任务 `wRMQnhciToy_-bP5D7GXl` 当前排查结果：`/api/character-jobs` 显示 `paused`，计数为 `171 succeeded / 529 queued / 0 running / 0 failed`；最近一次事件为“本轮完成 59 条后暂停”，不是正在后台执行。根因不是队列仍在跑，而是用户按筛选范围执行后，未命中的 queued 行仍留在 job 中，页面容易被理解为“排队但不执行”。
+7. 角色页新增“继续全部未生成”按钮：只收集当前 job 的 `queued/paused` 任务 ID 并显式提交 `/api/character-jobs/:id/start`，不会包含已成功或失败行，也不会改变“执行提取/导出飞书按当前筛选范围”的既有规则。
+8. 角色队列结束日志已细分：手动暂停记录“已按暂停请求停止”，显式样本上限记录“已达到本轮样本上限”，筛选范围跑完但仍有未筛选任务时记录“本次筛选范围已执行完成”，避免后续继续把范围完成误判为限流中断。
 
 ## Git 记录
 
-- HEAD：`07bbb08 Add character Lark export`
-- 当前分支：`codex/role-stable`
+- HEAD：`59d7209 Merge pull request #13 from fuer121/codex/role-stable`
+- 当前分支：`codex/character-continue-pending`
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：角色底图管理页、角色底图/章节画像 SQLite 模型、管理 API、Dify role-context 只读接口、角色提取成功结果 draft 沉淀、角色底图导出飞书 Base、环境变量样例、测试与文档同步。
+- 本轮提交范围：角色形象提取“继续全部未生成”入口、角色队列结束原因日志、执行范围测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -219,7 +223,7 @@
 | R-14 | 角色任务存在历史失败 run 缺少 raw outputs | 中 | 老失败记录只能看到“未返回立绘图片”，无法回溯 workflow 输出 | 新代码已保存失败诊断字段；旧 run 不回填 |
 | R-15 | 角色立绘远端签名 URL 会过期 | 中 | 成功任务稍后回看可能显示“图片暂不可读” | 新结果会尽量立即缓存到本地；已从历史 `markdown_output` base64 回填可修复的成功行。若远端 URL 已过期且历史 raw 中无 base64，则无法无损回填，只能重跑该行 |
 | R-16 | 本地 DSL 修改不会自动更新 Dify 平台 workflow | 中 | 只改仓库文件时，平台系统 Prompt 仍可能沿用旧“提取人物”语义 | 前端和当前 job Prompt 已可生效；平台侧如需彻底一致，需要重新导入 DSL 或手动同步 Dify 节点 |
-| R-17 | 取消默认小样本上限后，大批量执行会长时间占用队列并持续调用 Dify | 中 | 极大批量任务如果筛选范围过大，会持续运行直到完成或手动暂停 | 默认按用户选择范围执行；页面已有暂停整体任务入口；建议大批量前确认筛选命中数和 Prompt 已保存 |
+| R-17 | 取消默认小样本上限后，大批量执行会长时间占用队列并持续调用 Dify | 中 | 极大批量任务如果筛选范围过大，会持续运行直到完成或手动暂停 | 默认按用户选择范围执行；页面已有暂停整体任务入口；如需跑完所有未生成行，必须显式点击“继续全部未生成”，并先确认 Prompt 与 45 秒限速 |
 | R-18 | 当前运行 job 的 `promptText` 是 `测试 prompt` | 中 | 继续跑完 700 条会把测试文本叠加进部分描述，可能影响一致性 | 已记录事实；是否暂停并保存正式 Prompt 属于 Prompt 策略变化，需用户确认后再执行 |
 | R-19 | 多角色 `角色名` 字段可能生成多人立绘 | 中 | 若目标是“一张图只出一个角色”，多角色行会产生不符合预期的双人或多人结果 | 已通过样图确认；后续应先确认拆分/主角色/允许多人三选一策略，再改执行逻辑 |
 | R-20 | 双 workflow 并行调用会把单任务 Dify 请求量翻倍 | 中 | 大批量书籍任务会同时消耗两个 workflow 的额度与上游并发能力 | 当前按用户要求并行执行；如出现限流，再切为可配置串行或工作流级限速 |
