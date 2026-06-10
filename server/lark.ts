@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { nanoid } from 'nanoid';
-import type { Batch, CharacterJob, CharacterTask, LarkExportResult, ResultFile } from './types.js';
+import type { Batch, CharacterJob, CharacterTask, LarkExportResult, ResultFile, RoleAsset, RoleAssetStatus } from './types.js';
 import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
 
 interface CliResult {
@@ -16,6 +16,11 @@ interface RunLarkOptions {
 }
 
 export type LarkCliRunner = (args: string[], options?: RunLarkOptions) => Promise<CliResult>;
+
+interface AttachmentUploadSummary {
+  uploaded: number;
+  failed: number;
+}
 
 function asIdentityArg() {
   const value = process.env.LARK_CLI_AS || 'user';
@@ -52,8 +57,41 @@ function defaultRunLark(args: string[], options: RunLarkOptions = {}): Promise<C
 
 let larkCliRunner: LarkCliRunner = defaultRunLark;
 
-function runLark(args: string[], options: RunLarkOptions = {}): Promise<CliResult> {
-  return larkCliRunner(args, options);
+function readLarkCliRetries() {
+  const value = Number(process.env.LARK_CLI_RETRIES ?? 2);
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 2;
+}
+
+function readLarkCliRetryDelayMs() {
+  const value = Number(process.env.LARK_CLI_RETRY_DELAY_MS ?? 1500);
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 1500;
+}
+
+function delay(ms: number) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+function isRetryableLarkCliError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /network|timeout|TLS handshake timeout|i\/o timeout|connection reset|ECONNRESET|ETIMEDOUT|EAI_AGAIN|temporarily unavailable/i.test(
+    message
+  );
+}
+
+async function runLark(args: string[], options: RunLarkOptions = {}): Promise<CliResult> {
+  const retries = readLarkCliRetries();
+  const retryDelayMs = readLarkCliRetryDelayMs();
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await larkCliRunner(args, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retries || !isRetryableLarkCliError(error)) throw error;
+      await delay(retryDelayMs);
+    }
+  }
+  throw lastError;
 }
 
 export function __setLarkCliRunnerForTest(runner?: LarkCliRunner) {
@@ -243,6 +281,30 @@ const CHARACTER_TABLE_FIELDS = [
   { name: '错误', type: 'text' }
 ];
 
+const ROLE_ASSET_FIELDS = ['小说名称', '实际提取的角色名称', '启用状态'];
+
+const ROLE_ASSET_TABLE_FIELDS = [
+  { name: '小说名称', type: 'text' },
+  { name: '角色立绘图', type: 'attachment' },
+  { name: '实际提取的角色名称', type: 'text' },
+  {
+    name: '启用状态',
+    type: 'select',
+    multiple: false,
+    options: [
+      { name: '待确认', hue: 'Blue', lightness: 'Lighter' },
+      { name: '已启用', hue: 'Green', lightness: 'Light' },
+      { name: '已禁用', hue: 'Gray', lightness: 'Light' }
+    ]
+  }
+];
+
+const ROLE_ASSET_STATUS_LABEL: Record<RoleAssetStatus, string> = {
+  draft: '待确认',
+  active: '已启用',
+  disabled: '已禁用'
+};
+
 function formatRawValue(value: unknown) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value;
@@ -277,7 +339,7 @@ function characterTaskToRow(task: CharacterTask) {
     task.input.novel_name,
     task.input.chapter_sort,
     task.input.chapter_name,
-    task.input.role_name,
+    task.extracted_role_name || task.input.role_name,
     task.input.paragraph_content,
     task.extracted_description ?? '',
     task.result_text ?? raw,
@@ -286,6 +348,16 @@ function characterTaskToRow(task: CharacterTask) {
     task.elapsed_seconds ?? null,
     task.error ?? ''
   ];
+}
+
+function roleAssetToRow(asset: RoleAsset) {
+  return [asset.novel_name || String(asset.book_id), asset.role_name, ROLE_ASSET_STATUS_LABEL[asset.status]];
+}
+
+function roleAssetPortraitFile(asset: RoleAsset) {
+  if (asset.image_file) return asset.image_file;
+  if (!asset.image_url) return undefined;
+  return registerRemoteFile(asset.id, asset.image_url, `${asset.role_name}.png`);
 }
 
 async function createBase(name: string) {
@@ -389,34 +461,72 @@ async function characterBatchCreateRecords(baseToken: string, tableId: string, j
   return recordIds;
 }
 
-async function uploadAttachments(baseToken: string, tableId: string, batch: Batch, recordIds: string[]) {
-  let uploaded = 0;
-  for (let index = 0; index < batch.tasks.length; index += 1) {
-    const task = batch.tasks[index];
-    const recordId = recordIds[index];
-    if (!recordId || task.result_files.length === 0) continue;
-    for (const file of task.result_files) {
-      const filePath = await ensureLocalFile(file);
-      const fileDir = path.dirname(filePath);
-      await runLark([
+async function roleAssetBatchCreateRecords(baseToken: string, tableId: string, assets: RoleAsset[]) {
+  const rows = assets.map(roleAssetToRow);
+  if (rows.length === 0) return [];
+
+  const tempDir = path.resolve(process.cwd(), 'tmp', 'lark-export');
+  await mkdir(tempDir, { recursive: true });
+
+  const recordIds: string[] = [];
+  for (let index = 0; index < rows.length; index += 200) {
+    const filePath = path.join(tempDir, `role-asset-records-${index}-${nanoid(6)}.json`);
+    const payload = {
+      fields: ROLE_ASSET_FIELDS,
+      rows: rows.slice(index, index + 200)
+    };
+    await writeFile(filePath, JSON.stringify(payload), 'utf8');
+    const fileDir = path.dirname(filePath);
+    const result = await runLark(
+      [
         'base',
-        '+record-upload-attachment',
+        '+record-batch-create',
         ...asIdentityArg(),
         '--base-token',
         baseToken,
         '--table-id',
         tableId,
-        '--record-id',
-        recordId,
-        '--field-id',
-        '结果图片',
-        '--file',
-        relativeCliPath(filePath)
-      ], { cwd: fileDir });
-      uploaded += 1;
+        '--json',
+        `@${relativeCliPath(filePath)}`
+      ],
+      { cwd: fileDir }
+    );
+    recordIds.push(...extractRecordIds(result.json));
+  }
+  return recordIds;
+}
+
+async function uploadRoleAssetAttachments(baseToken: string, tableId: string, assets: RoleAsset[], recordIds: string[]) {
+  const summary: AttachmentUploadSummary = { uploaded: 0, failed: 0 };
+  for (let index = 0; index < assets.length; index += 1) {
+    const recordId = recordIds[index];
+    if (!recordId) continue;
+    const portraitFile = roleAssetPortraitFile(assets[index]);
+    if (!portraitFile) continue;
+    if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '角色立绘图', portraitFile)) {
+      summary.uploaded += 1;
+    } else {
+      summary.failed += 1;
     }
   }
-  return uploaded;
+  return summary;
+}
+
+async function uploadAttachments(baseToken: string, tableId: string, batch: Batch, recordIds: string[]) {
+  const summary: AttachmentUploadSummary = { uploaded: 0, failed: 0 };
+  for (let index = 0; index < batch.tasks.length; index += 1) {
+    const task = batch.tasks[index];
+    const recordId = recordIds[index];
+    if (!recordId || task.result_files.length === 0) continue;
+    for (const file of task.result_files) {
+      if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '结果图片', file)) {
+        summary.uploaded += 1;
+      } else {
+        summary.failed += 1;
+      }
+    }
+  }
+  return summary;
 }
 
 async function uploadFileAttachment(baseToken: string, tableId: string, recordId: string, fieldName: string, file: ResultFile) {
@@ -439,6 +549,17 @@ async function uploadFileAttachment(baseToken: string, tableId: string, recordId
   ], { cwd: fileDir });
 }
 
+async function uploadFileAttachmentSafely(baseToken: string, tableId: string, recordId: string, fieldName: string, file: ResultFile) {
+  try {
+    await uploadFileAttachment(baseToken, tableId, recordId, fieldName, file);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[lark-export] 附件上传失败，已跳过：field=${fieldName} record=${recordId} file=${file.name} error=${message}`);
+    return false;
+  }
+}
+
 async function registerParagraphImage(task: CharacterTask) {
   const url = task.input.paragraph_image_url.trim();
   if (!url) return undefined;
@@ -449,24 +570,30 @@ async function registerParagraphImage(task: CharacterTask) {
 }
 
 async function uploadCharacterAttachments(baseToken: string, tableId: string, tasks: CharacterTask[], recordIds: string[]) {
-  let uploaded = 0;
+  const summary: AttachmentUploadSummary = { uploaded: 0, failed: 0 };
   for (let index = 0; index < tasks.length; index += 1) {
     const task = tasks[index];
     const recordId = recordIds[index];
     if (!recordId) continue;
 
     for (const file of task.portrait_files) {
-      await uploadFileAttachment(baseToken, tableId, recordId, '生成立绘', file);
-      uploaded += 1;
+      if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '生成立绘', file)) {
+        summary.uploaded += 1;
+      } else {
+        summary.failed += 1;
+      }
     }
 
     const paragraphImage = await registerParagraphImage(task);
     if (paragraphImage) {
-      await uploadFileAttachment(baseToken, tableId, recordId, '原段落图片', paragraphImage);
-      uploaded += 1;
+      if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '原段落图片', paragraphImage)) {
+        summary.uploaded += 1;
+      } else {
+        summary.failed += 1;
+      }
     }
   }
-  return uploaded;
+  return summary;
 }
 
 export async function exportBatchToLark(batch: Batch): Promise<LarkExportResult> {
@@ -475,7 +602,7 @@ export async function exportBatchToLark(batch: Batch): Promise<LarkExportResult>
   const { baseToken, baseUrl } = await createBase(baseName);
   const tableId = await createTable(baseToken, tableName);
   const recordIds = await batchCreateRecords(baseToken, tableId, batch);
-  const attachmentsUploaded = await uploadAttachments(baseToken, tableId, batch, recordIds);
+  const attachments = await uploadAttachments(baseToken, tableId, batch, recordIds);
 
   return {
     baseToken,
@@ -484,7 +611,8 @@ export async function exportBatchToLark(batch: Batch): Promise<LarkExportResult>
     tableName,
     createdAt: new Date().toISOString(),
     recordsCreated: recordIds.length,
-    attachmentsUploaded
+    attachmentsUploaded: attachments.uploaded,
+    attachmentsFailed: attachments.failed
   };
 }
 
@@ -504,7 +632,7 @@ export async function exportCharacterJobToLark(job: CharacterJob, taskIds: strin
   const { baseToken, baseUrl } = await createBase(baseName);
   const tableId = await createTableWithFields(baseToken, tableName, CHARACTER_TABLE_FIELDS);
   const recordIds = await characterBatchCreateRecords(baseToken, tableId, job.id, tasks);
-  const attachmentsUploaded = await uploadCharacterAttachments(baseToken, tableId, tasks, recordIds);
+  const attachments = await uploadCharacterAttachments(baseToken, tableId, tasks, recordIds);
 
   return {
     baseToken,
@@ -513,6 +641,29 @@ export async function exportCharacterJobToLark(job: CharacterJob, taskIds: strin
     tableName,
     createdAt: new Date().toISOString(),
     recordsCreated: recordIds.length,
-    attachmentsUploaded
+    attachmentsUploaded: attachments.uploaded,
+    attachmentsFailed: attachments.failed
+  };
+}
+
+export async function exportRoleAssetsToLark(assets: RoleAsset[]): Promise<LarkExportResult> {
+  if (assets.length === 0) throw new Error('导出范围不能为空');
+
+  const baseName = `角色底图导出 ${larkDate()}`;
+  const tableName = '角色底图';
+  const { baseToken, baseUrl } = await createBase(baseName);
+  const tableId = await createTableWithFields(baseToken, tableName, ROLE_ASSET_TABLE_FIELDS);
+  const recordIds = await roleAssetBatchCreateRecords(baseToken, tableId, assets);
+  const attachments = await uploadRoleAssetAttachments(baseToken, tableId, assets, recordIds);
+
+  return {
+    baseToken,
+    baseUrl,
+    tableId,
+    tableName,
+    createdAt: new Date().toISOString(),
+    recordsCreated: recordIds.length,
+    attachmentsUploaded: attachments.uploaded,
+    attachmentsFailed: attachments.failed
   };
 }

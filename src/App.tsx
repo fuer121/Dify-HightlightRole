@@ -25,12 +25,13 @@ import {
 } from 'lucide-react';
 import { getRunIsValidValue } from './runIsValid';
 import { CharacterExtractionPage } from './CharacterExtractionPage';
+import { RoleAssetManagementPage } from './RoleAssetManagementPage';
 
 type RequiredInputKey = 'book_id' | 'paragraph_content' | 'chapter_sort';
 type Mapping = Record<RequiredInputKey, string>;
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused';
 type StatusFilter = TaskStatus | 'all';
-type AppPage = 'books' | 'quality' | 'characters';
+type AppPage = 'books' | 'quality' | 'characters' | 'role-assets';
 type ImagePresenceFilter = 'all' | 'yes' | 'no';
 type ValueStatusFilter = 'all' | 'valuable' | 'not_valuable' | 'unknown';
 type RangeFilterMode = 'chapter' | 'row';
@@ -207,6 +208,7 @@ interface LarkExportResult {
   createdAt: string;
   recordsCreated: number;
   attachmentsUploaded: number;
+  attachmentsFailed?: number;
 }
 
 interface Batch {
@@ -641,7 +643,13 @@ function describeTaskQueryScope(queryState: TaskQueryState) {
 export function App() {
   const initialPageParam = new URLSearchParams(window.location.search).get('page');
   const initialPage: AppPage =
-    initialPageParam === 'quality' ? 'quality' : initialPageParam === 'characters' ? 'characters' : 'books';
+    initialPageParam === 'quality'
+      ? 'quality'
+      : initialPageParam === 'characters'
+        ? 'characters'
+        : initialPageParam === 'role-assets'
+          ? 'role-assets'
+          : 'books';
   const [page, setPage] = useState<AppPage>(initialPage);
   const [difyWorkflowName, setDifyWorkflowName] = useState('LL-段落高光生图-效果测试');
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -666,7 +674,7 @@ export function App() {
   function updatePage(nextPage: AppPage) {
     setPage(nextPage);
     const url = new URL(window.location.href);
-    if (nextPage === 'quality' || nextPage === 'characters') {
+    if (nextPage === 'quality' || nextPage === 'characters' || nextPage === 'role-assets') {
       url.searchParams.set('page', nextPage);
     } else {
       url.searchParams.delete('page');
@@ -685,6 +693,13 @@ export function App() {
         />
       ) : page === 'characters' ? (
         <CharacterWorkspace
+          onNavigate={updatePage}
+          difyWorkflowName={difyWorkflowName}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        />
+      ) : page === 'role-assets' ? (
+        <RoleAssetWorkspace
           onNavigate={updatePage}
           difyWorkflowName={difyWorkflowName}
           isSidebarCollapsed={isSidebarCollapsed}
@@ -747,6 +762,10 @@ function WorkspaceSidebar({
         <button className={page === 'characters' ? 'active' : ''} onClick={() => onChange('characters')} title="角色形象提取">
           <ImageIcon size={16} />
           <span>角色形象提取</span>
+        </button>
+        <button className={page === 'role-assets' ? 'active' : ''} onClick={() => onChange('role-assets')} title="角色底图管理">
+          <Database size={16} />
+          <span>角色底图管理</span>
         </button>
       </nav>
       {!isCollapsed && children}
@@ -819,6 +838,38 @@ function CharacterWorkspace({
       </WorkspaceSidebar>
       <section className="workspace-content quality-workspace-content">
         <CharacterExtractionPage difyWorkflowName={difyWorkflowName} />
+      </section>
+    </div>
+  );
+}
+
+function RoleAssetWorkspace({
+  onNavigate,
+  difyWorkflowName,
+  isSidebarCollapsed,
+  onToggleSidebar
+}: {
+  onNavigate: (page: AppPage) => void;
+  difyWorkflowName: string;
+  isSidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
+  return (
+    <div className={`workspace-frame ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <WorkspaceSidebar
+        page="role-assets"
+        onChange={onNavigate}
+        difyWorkflowName={difyWorkflowName}
+        isCollapsed={isSidebarCollapsed}
+        onToggle={onToggleSidebar}
+      >
+        <div className="sidebar-note">
+          <Database size={16} />
+          <span>管理角色底图、默认画像与章节画像，供 Dify 工作流读取。</span>
+        </div>
+      </WorkspaceSidebar>
+      <section className="workspace-content quality-workspace-content">
+        <RoleAssetManagementPage />
       </section>
     </div>
   );
@@ -1294,6 +1345,7 @@ export function BatchWorkflowPage() {
                 {batch?.export && (
                   <a className="export-link" href={batch.export.baseUrl} target="_blank" rel="noreferrer">
                     飞书 Base：{batch.export.recordsCreated} 行，{batch.export.attachmentsUploaded} 个附件
+                    {batch.export.attachmentsFailed ? `，${batch.export.attachmentsFailed} 个附件失败` : ''}
                   </a>
                 )}
               </div>

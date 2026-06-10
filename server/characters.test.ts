@@ -80,6 +80,8 @@ describe('character jobs', () => {
     delete process.env.CHARACTER_DIFY_RETRY_DELAY_MS;
     delete process.env.CHARACTER_DIFY_TASK_DELAY_MS;
     delete process.env.CHARACTER_DIFY_MAX_TASKS_PER_RUN;
+    delete process.env.LARK_CLI_RETRIES;
+    delete process.env.LARK_CLI_RETRY_DELAY_MS;
     __setLarkCliRunnerForTest();
     vi.unstubAllGlobals();
   });
@@ -254,7 +256,7 @@ describe('character jobs', () => {
           '第一瞳术师',
           1,
           '第1章 异世重生',
-          '云筝',
+          '云筝-提取',
           '段落一',
           '云筝 立绘描述',
           'export-run-2',
@@ -266,6 +268,202 @@ describe('character jobs', () => {
       '生成立绘',
       '原段落图片'
     ]);
+  });
+
+  it('retries transient lark-cli network timeouts during export', async () => {
+    process.env.LARK_CLI_RETRIES = '1';
+    process.env.LARK_CLI_RETRY_DELAY_MS = '0';
+    let uploadAttempts = 0;
+    const runner: LarkCliRunner = async (args) => {
+      if (args.includes('+base-create')) {
+        const json = { data: { app_token: 'base-token', url: 'https://feishu.example/base/base-token' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+table-create')) {
+        const json = { data: { table_id: 'tblCharacter' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-batch-create')) {
+        const json = { data: { record_id_list: ['recOnlyRequested'] } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-upload-attachment')) {
+        uploadAttempts += 1;
+        if (uploadAttempts === 1) {
+          throw new Error('lark-cli 失败（exit 4）：{"error":{"type":"network","subtype":"timeout","message":"TLS handshake timeout"}}');
+        }
+      }
+      return { stdout: '{}', stderr: '' };
+    };
+    __setLarkCliRunnerForTest(runner);
+
+    __setCharacterWorkflowControlsForTest(async (task) => ({
+      workflowRunId: `retry-export-run-${task.row_no}`,
+      taskId: `retry-export-task-${task.row_no}`,
+      outputs: {
+        character_name: task.input.role_name,
+        description: `${task.input.role_name} 立绘描述`,
+        character_image: `https://cdn.example.com/retry-portrait-${task.row_no}.png`
+      },
+      raw: {}
+    }));
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '默认 prompt'
+    );
+
+    startCharacterJob(job.id, [job.tasks[0].id]);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    const result = await exportCharacterJobToLark(getCharacterJob(job.id)!, [job.tasks[0].id]);
+
+    expect(result.attachmentsUploaded).toBe(2);
+    expect(uploadAttempts).toBe(3);
+  });
+
+  it('keeps exported records when attachment uploads keep timing out', async () => {
+    process.env.LARK_CLI_RETRIES = '1';
+    process.env.LARK_CLI_RETRY_DELAY_MS = '0';
+    const runner: LarkCliRunner = async (args) => {
+      if (args.includes('+base-create')) {
+        const json = { data: { app_token: 'base-token', url: 'https://feishu.example/base/base-token' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+table-create')) {
+        const json = { data: { table_id: 'tblCharacter' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-batch-create')) {
+        const json = { data: { record_id_list: ['recOnlyRequested'] } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-upload-attachment')) {
+        throw new Error('lark-cli 失败（exit 4）：{"error":{"type":"network","subtype":"timeout","message":"TLS handshake timeout"}}');
+      }
+      return { stdout: '{}', stderr: '' };
+    };
+    __setLarkCliRunnerForTest(runner);
+
+    __setCharacterWorkflowControlsForTest(async (task) => ({
+      workflowRunId: `partial-export-run-${task.row_no}`,
+      taskId: `partial-export-task-${task.row_no}`,
+      outputs: {
+        character_name: task.input.role_name,
+        description: `${task.input.role_name} 立绘描述`,
+        character_image: `https://cdn.example.com/partial-portrait-${task.row_no}.png`
+      },
+      raw: {}
+    }));
+
+    const job = createCharacterJob(
+      workbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '默认 prompt'
+    );
+
+    startCharacterJob(job.id, [job.tasks[0].id]);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    const result = await exportCharacterJobToLark(getCharacterJob(job.id)!, [job.tasks[0].id]);
+
+    expect(result.recordsCreated).toBe(1);
+    expect(result.attachmentsUploaded).toBe(0);
+    expect(result.attachmentsFailed).toBe(2);
+  });
+
+  it('exports the extracted portrait role name instead of the original multi-role image field', async () => {
+    const larkCalls: Array<{ args: string[]; cwd?: string }> = [];
+    const createdRecordPayloads: unknown[] = [];
+    const runner: LarkCliRunner = async (args, options) => {
+      larkCalls.push({ args, cwd: options?.cwd });
+      if (args.includes('+base-create')) {
+        const json = { data: { app_token: 'base-token', url: 'https://feishu.example/base/base-token' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+table-create')) {
+        const json = { data: { table_id: 'tblCharacter' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-batch-create')) {
+        const jsonArg = args[args.indexOf('--json') + 1];
+        const payloadPath = path.join(options?.cwd ?? process.cwd(), jsonArg.replace(/^@\.?\//, ''));
+        const payload = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile(payloadPath, 'utf8')));
+        createdRecordPayloads.push(payload);
+        const json = { data: { record_id_list: ['recExtractedRole'] } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      return { stdout: '{}', stderr: '' };
+    };
+    __setLarkCliRunnerForTest(runner);
+
+    __setCharacterWorkflowControlsForTest(async () => ({
+      workflowRunId: 'export-run-extracted-role',
+      taskId: 'export-task-extracted-role',
+      outputs: {
+        character_name: '云筝',
+        description: '云筝单人立绘',
+        character_image: 'https://cdn.example.com/yunzheng.png'
+      },
+      raw: {}
+    }));
+
+    const multiRoleWorkbook: ParsedWorkbook = {
+      ...workbook,
+      id: 'character-workbook-multi-role',
+      sheets: [
+        {
+          ...workbook.sheets[0],
+          rows: [
+            {
+              ...workbook.sheets[0].rows[0],
+              roles: '云筝,容烁'
+            }
+          ]
+        }
+      ]
+    };
+    const job = createCharacterJob(
+      multiRoleWorkbook,
+      '执行结果7',
+      {
+        novel_name: 'book_title',
+        chapter_sort: '章节序号',
+        chapter_name: 'chapter_title',
+        paragraph_content: 'paragraph_content',
+        paragraph_image_url: 'hightlight_image_url',
+        role_name: 'roles'
+      },
+      '默认 prompt'
+    );
+
+    startCharacterJob(job.id, [job.tasks[0].id]);
+    await waitFor(() => getCharacterJob(job.id)?.tasks[0]?.status === 'succeeded');
+
+    await exportCharacterJobToLark(getCharacterJob(job.id)!, [job.tasks[0].id]);
+
+    expect(createdRecordPayloads[0]).toMatchObject({
+      fields: expect.arrayContaining(['角色名']),
+      rows: [expect.arrayContaining(['云筝'])]
+    });
+    expect(JSON.stringify(createdRecordPayloads[0])).not.toContain('云筝,容烁');
   });
 
   it('uses updated character prompt for subsequent task runs', async () => {

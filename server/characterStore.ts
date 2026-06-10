@@ -347,6 +347,12 @@ export function listCharacterTaskRuns(taskId: string): CharacterTaskRunRecord[] 
     });
 }
 
+export function getCharacterTaskById(taskId: string) {
+  initializeCharacterStore();
+  const row = getDb().prepare('SELECT * FROM character_job_tasks WHERE id = ?').get(taskId) as SqlRow | undefined;
+  return row ? serializeCharacterTask(row) : undefined;
+}
+
 export function getCharacterJob(jobId: string): CharacterJob | undefined {
   initializeCharacterStore();
   const row = getDb().prepare('SELECT * FROM character_jobs WHERE id = ?').get(jobId) as SqlRow | undefined;
