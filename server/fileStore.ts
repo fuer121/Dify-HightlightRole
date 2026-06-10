@@ -131,6 +131,27 @@ export async function registerBase64File(taskId: string, value: string, name?: s
   return file;
 }
 
+export async function registerBufferFile(taskId: string, buffer: Buffer, name: string, mimeType?: string) {
+  const id = nanoid();
+  const detectedMime = sniffImageMime(buffer, mimeType ?? guessMimeFromName(name));
+  const safeName = name || `uploaded-${id}.${extensionForMime(detectedMime)}`;
+  await mkdir(TMP_DIR, { recursive: true });
+  const localPath = path.join(TMP_DIR, `${id}-${safeName.replace(/[^\w.-]+/g, '-')}`);
+  await writeFile(localPath, buffer);
+  const file: ResultFile = {
+    id,
+    taskId,
+    name: safeName,
+    mimeType: detectedMime,
+    size: buffer.length,
+    previewUrl: `/api/files/${id}`,
+    localPath,
+    sourceKind: 'local'
+  };
+  files.set(id, file);
+  return file;
+}
+
 export function getFile(id: string) {
   return files.get(id);
 }

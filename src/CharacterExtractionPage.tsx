@@ -135,6 +135,7 @@ interface LarkExportResult {
   createdAt: string;
   recordsCreated: number;
   attachmentsUploaded: number;
+  attachmentsFailed?: number;
 }
 
 interface HealthPayload {
@@ -709,6 +710,7 @@ export function CharacterExtractionPage({ difyWorkflowName }: { difyWorkflowName
               {characterExport?.baseUrl && (
                 <a className="export-link" href={characterExport.baseUrl} target="_blank" rel="noreferrer">
                   飞书 Base：{characterExport.recordsCreated} 行，{characterExport.attachmentsUploaded} 个附件
+                  {characterExport.attachmentsFailed ? `，${characterExport.attachmentsFailed} 个附件失败` : ''}
                 </a>
               )}
             </div>

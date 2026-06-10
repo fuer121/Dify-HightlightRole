@@ -39,6 +39,7 @@ import { exportBatchToLark } from './lark.js';
 import { registerQualityRoutes } from './quality.js';
 import { registerCharacterRoutes } from './characterRoutes.js';
 import { getDifyWorkflowConfigs } from './dify.js';
+import { registerRoleAssetRoutes } from './roleAssetRoutes.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -82,6 +83,8 @@ app.get('/api/health', (_req, res) => {
       characterDifyRetryDelayMs: process.env.CHARACTER_DIFY_RETRY_DELAY_MS ?? null,
       characterDifyTaskDelayMs: process.env.CHARACTER_DIFY_TASK_DELAY_MS ?? null,
       characterDifyMaxTasksPerRun: process.env.CHARACTER_DIFY_MAX_TASKS_PER_RUN ?? null,
+      hasRoleAssetApiToken: Boolean(process.env.ROLE_ASSET_API_TOKEN),
+      roleAssetPublicBaseUrl: process.env.ROLE_ASSET_PUBLIC_BASE_URL ?? null,
       hasQualityDifyApiKey: Boolean(process.env.QUALITY_DIFY_API_KEY ?? process.env.DIFY_QUALITY_API_KEY),
       qualityDifyApiBase: process.env.QUALITY_DIFY_API_BASE ?? process.env.DIFY_API_BASE ?? null,
       qualityDifyResponseMode: process.env.QUALITY_DIFY_RESPONSE_MODE ?? null
@@ -555,6 +558,7 @@ registerQualityRoutes(app, {
 registerCharacterRoutes(app, {
   getWorkbook: (workbookId) => workbooks.get(workbookId)
 });
+registerRoleAssetRoutes(app);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   void _next;

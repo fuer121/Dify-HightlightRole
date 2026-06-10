@@ -10,6 +10,7 @@ import {
   saveCharacterTask
 } from './characterStore.js';
 import { __runCharacterWorkflowForTest, __setCharacterWorkflowControlsForTest, applyCharacterDifyResult } from './characterDify.js';
+import { importCharacterTaskToRoleAssets } from './roleAssets.js';
 
 const jobs = new Map<string, CharacterJob>();
 const subscribers = new Map<string, Set<(job: CharacterJob) => void>>();
@@ -123,6 +124,7 @@ async function runSingleTask(job: CharacterJob, task: CharacterTask) {
     task.finished_at = now();
     task.elapsed_seconds = Number(((new Date(task.finished_at).getTime() - new Date(task.started_at!).getTime()) / 1000).toFixed(1));
     recordCharacterTaskRun(task);
+    importCharacterTaskToRoleAssets(task);
     addEvent(job, 'task', `第 ${task.row_no} 行立绘生成完成`, task.id);
   } catch (error) {
     task.status = 'failed';

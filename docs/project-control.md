@@ -1,6 +1,6 @@
 # 项目总控主文档
 
-更新时间：2026-06-09
+更新时间：2026-06-10
 负责人：项目总控 Agent
 
 ## 项目总览
@@ -13,10 +13,10 @@
 
 ## 当前状态
 
-- Git 基线：`7e657e3 Merge pull request #10 from fuer121/codex/Prompt-upgrade`
-- 当前分支：`codex/change-dify-flow`
-- 工作区状态：书籍库生图链路已扩展为双工作流执行与右侧对比展示；主 workflow 继续使用 `DIFY_API_KEY`，对照 workflow 新增 `DIFY_COMPARE_API_KEY`；本机 `.env.local` 已配置真实对照 key；书籍库任务列表与右侧详情模块已支持拖拽调宽；角色形象提取新增按当前筛选范围导出飞书 Base；提交范围只包含占位样例。
-- 已验证项：`npm test` 通过 10 个测试文件 79 个用例，`npm run build` 通过，`npm run lint` 通过；重启后端后 `/api/health` 返回 `difyWorkflows=[线上工作流, 对照工作流]` 且两者 `configured=true`；前端稳定地址 `http://172.16.79.76:5173/?page=books` 返回 200。
+- Git 基线：`07bbb08 Add character Lark export`
+- 当前分支：`codex/role-stable`
+- 工作区状态：已新增「角色底图管理」独立页面与 Dify 节点数据服务；工作流中「获取底图、画像」节点可迁移为网站管理数据 + `/api/workflow/role-context` 只读接口；角色底图管理支持按当前筛选列表导出飞书多维表格。
+- 已验证项：`npm test` 通过 12 个测试文件 92 个用例；`npm run build` 通过；`npm run lint` 通过。
 - PR #10 已合并功能主题：
   - 继续执行支持按筛选范围重跑已成功任务，并把真实执行 scope 写入批次日志
   - 书籍任务历史新增运行记录图片预览与双记录对比
@@ -33,12 +33,15 @@
 - 真实运行快照（2026-06-09 18:08:51 CST）：角色 job `wRMQnhciToy_-bP5D7GXl` 仍为 `running`，文件 `首批700张生图.xlsx`，计数为 `43 succeeded / 1 running / 656 queued / 0 failed`。
 - Prompt/效果核查：当前 job 持久化 `promptText` 为 `测试 prompt`；最近成功任务的 `raw_outputs.description` 已包含“参考原图人物特征重绘、纯白背景、全身立绘、不要原场景”等语义，抽样 `/api/files/caVX41cbKmKIJVsz1JosD` 返回 200 且本地缓存可读。
 - 新发现风险：多角色 `角色名` 字段（如 `钟离无渊,燕沉`）可能生成双人白底立绘，即使描述里包含“单人”。这不是“抠图”证据，但属于后续需要确认的多角色输入策略。
+- 存量回填结果（2026-06-10 查询）：角色形象提取历史成功立绘已沉淀到角色底图管理。当前 SQLite 有 112 条有效记录，其中 67 条 `active`、35 条 `draft`、10 条 `disabled`；《第一瞳术师》81 条映射到 `book_id=215243`，《废材又怎么样？照样吊打你！》31 条按用户确认映射到《废材那又怎样》`book_id=1721648`；当前无有效 `book_id=0` 候选。若管理页继续启用/删除候选，该计数会随真实数据变化。
+- 角色底图调用边界：当前网站已提供 `/api/workflow/role-context`，但不会自动注入书籍库生图请求；只有 Dify workflow 内部节点主动 HTTP 调用该接口时，角色底图管理数据才会参与生图。若 Dify 仍使用旧「获取底图、画像」Python 节点，则继续按旧 CDN 底图路径和 role txt 逻辑执行。
 
 ## 本轮目标
 
-- 在书籍库生图链路上实现同一任务并行调用主工作流和对照工作流。
-- 将两个 workflow 的图片、状态、错误、耗时和名称持久化，并在右侧任务详情/执行记录中对比展示。
-- 保持旧单工作流历史记录可读，保持当前列表筛选/勾选执行范围语义不变。
+- 新增「角色底图管理」入口，支持维护书籍角色底图、默认画像、章节画像与启用状态。
+- 新增 `role_assets`、`role_asset_profiles` 存储模型和管理 API，角色形象提取成功结果沉淀为 `draft` 候选。
+- 提供 Dify workflow 专用只读接口 `/api/workflow/role-context`，兼容旧节点输出 `role_url / role_list / prompt / highlight_content` 等字段。
+- 保持现有书籍库生图、双工作流对比、角色形象提取任务模型不变。
 
 ## 任务看板
 
@@ -71,6 +74,9 @@
 | IMPL-UI-02 | 双工作流结果卡并排展示并隐藏调试字段 | 已验证 | 实现型 Agent | 用户浏览器批注、右侧任务详情 workflow cards | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 主/对照 workflow 在任务详情中优先并排展示；隐藏 `workflow_run_id/dify_task_id` 对应的“运行/任务”字段；保留 workflow 名称、状态、图片/生成中、标题、描述和错误；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 | IMPL-UI-03 | 书籍库任务列表与详情模块支持拖拽调宽 | 已验证 | 实现型 Agent | 用户浏览器批注、书籍库中栏任务列表与右侧任务详情 | `src/App.tsx`、`src/styles.css`、`src/App.books-scope.test.tsx` | 中栏与右栏之间提供拖拽分隔条；拖拽后右侧详情宽度持久化；窄屏自动回退单列布局；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小 UI 提交 |
 | IMPL-CHAR-10 | 角色形象提取按当前筛选范围导出飞书 Base | 已验证 | 实现型 Agent | 用户确认导出范围为当前筛选，图片字段为立绘附件 + 原图附件 | `server/lark.ts`、`server/characterRoutes.ts`、`src/CharacterExtractionPage.tsx`、相关测试 | `/api/character-jobs/:id/export/lark` 只导出传入 `taskIds`；前端导出按钮提交当前筛选命中任务；飞书表包含角色字段并上传生成立绘与原段落图片附件；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支角色导出提交 |
+| IMPL-ROLE-ASSET-01 | 新增角色底图管理与 Dify 节点数据服务 | 已验证 | 实现型 Agent | Dify 节点「获取底图、画像」输入输出契约、当前角色提取任务与文件缓存 | `server/roleAssets.ts`、`server/roleAssetRoutes.ts`、`src/RoleAssetManagementPage.tsx`、`src/App.tsx`、`src/styles.css`、测试与文档 | 角色底图可新增/编辑/禁用/软删；章节画像可维护；workflow 接口鉴权后返回旧节点兼容字段；角色提取成功结果自动沉淀 draft 候选；存量成功立绘可一键回填；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| IMPL-ROLE-ASSET-02 | 角色底图管理按当前筛选列表导出飞书 Base | 已验证 | 实现型 Agent | 用户确认导出字段为小说名称、角色立绘图、实际提取的角色名称、启用状态 | `server/lark.ts`、`server/roleAssetRoutes.ts`、`src/RoleAssetManagementPage.tsx`、相关测试 | `/api/role-assets/export/lark` 只导出前端传入的当前列表 `assetIds`；飞书表包含 `小说名称`、`角色立绘图`、`实际提取的角色名称`、`启用状态`；角色立绘图作为附件上传；空范围和非法 ID 安全失败；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支角色底图导出提交 |
+| BUG-LARK-01 | 飞书导出遇到 lark-cli TLS handshake timeout | 已验证 | 排查型 Agent -> 实现型 Agent | 用户报错 `network.timeout / TLS handshake timeout`、`server/lark.ts` | `server/lark.ts`、`server/characters.test.ts`、`.env.example` | lark-cli 网络/超时类错误自动重试；权限/参数类错误不重试；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小修复提交 |
 
 ## 线程索引
 
@@ -100,6 +106,8 @@
 | IMPL-SIDEBAR-COLLAPSE | 侧边栏抽屉手动收起/展开 | 实现线程 | 实现型 Agent | 用户浏览器批注、`WorkspaceSidebar` | 手动切换可用，自动化测试覆盖 | 已完成 |
 | IMPL-WORKFLOW-CARD-COMPARE | 双工作流结果卡展示优化 | 实现线程 | 实现型 Agent | 用户浏览器批注、`WorkflowResultCards` | 右侧详情按双列对比展示，隐藏调试 ID | 已完成 |
 | IMPL-BOOK-PANEL-RESIZE | 书籍库中栏/右栏拖拽调宽 | 实现线程 | 实现型 Agent | 用户浏览器批注、`book-main-grid`、右侧任务详情宽度 | 拖拽分隔条可调整并持久化详情宽度，窄屏不破版 | 已完成 |
+| IMPL-ROLE-ASSET-MANAGER | 角色底图管理与 workflow 数据服务 | 实现线程 | 实现型 Agent | Dify 节点输入输出、角色任务成功结果、`/api/files` 文件服务 | 管理页/API/只读 workflow 接口实现并通过测试，文档同步 | 已完成 |
+| DATA-ROLE-ASSET-BACKFILL | 回填存量角色立绘到角色底图管理 | 数据迁移线程 | 总控 Agent | `character_job_tasks` 成功任务、`role_assets`、用户确认书籍别名 | 成功立绘进入 `draft` 候选，书籍 ID 映射正确，无 `book_id=0` 有效记录 | 已完成 |
 
 ## 决策记录
 
@@ -166,15 +174,29 @@
 38. 书籍库任务列表与右侧任务详情之间新增拖拽分隔条；右侧宽度写入浏览器本地存储，刷新后保留；窄屏下隐藏分隔条并强制单列布局。
 39. 角色形象提取的「导出飞书」与「执行提取」共享同一范围语义：前端只提交当前筛选命中的 `taskIds`，后端校验这些任务必须属于当前 job，禁止偷偷导出全量。
 40. 角色导出飞书每次新建 Base，不追加旧 Base；生成立绘和原段落图片都走附件字段上传，queued/running/failed 行也会按当前状态写入，缺图不阻塞记录导出。
+41. 角色底图管理采用独立数据模型，不复用书籍库任务、质量判断任务或角色形象提取任务表；workflow 查询只读取 `active` 记录。
+42. 角色形象提取成功结果自动沉淀为 `draft` 候选；由于角色提取 Excel 目前没有 `book_id`，候选必须经人工确认/补齐书籍 ID 并启用后才会被 workflow 命中。
+43. Dify 专用接口 `/api/workflow/role-context` 保持旧节点字段兼容，鉴权使用 `ROLE_ASSET_API_TOKEN`；Dify HTTP 节点必须通过 `Authorization: Bearer <token>` 调用。
+44. 本期 workflow 图片 URL 生成规则：优先返回原始 CDN URL；本地上传/缓存文件必须配置 `ROLE_ASSET_PUBLIC_BASE_URL` 后才能生成 Dify 可访问的绝对 URL，不能使用 `localhost`。
+45. 用户确认《废材又怎么样？照样吊打你！》与《废材那又怎样》为同一本书，统一按 `book_id=1721648` 映射；该别名已写入角色底图回填逻辑。
+46. 「角色底图管理」与 Dify 原工作流角色底图逻辑解耦：网站只提供可选数据服务，Dify 未主动调用 `/api/workflow/role-context` 时，不影响原 Dify 节点按旧逻辑查角色底图。
+
+### 2026-06-10
+
+1. 角色底图管理新增「导出飞书」能力，导出范围固定为页面当前筛选/查询后的角色底图列表；前端提交当前列表 `assetIds`，后端校验 ID 必须存在且未删除，禁止静默扩大为全量。
+2. 角色底图导出每次新建 Base，表名为 `角色底图`，字段为 `小说名称`、`角色立绘图`、`实际提取的角色名称`、`启用状态`；`角色立绘图` 作为附件上传，状态以中文展示：`active=已启用`、`draft=待确认`、`disabled=已禁用`。
+3. 角色形象提取导出飞书时，`角色名` 列优先使用本次立绘实际提取出的 `extracted_role_name`；只有缺失时才回退 Excel 原始 `角色名` 字段，避免多角色原图字段污染导出表。
+4. 飞书导出中的 `lark-cli` 调用增加网络类错误自动重试，默认 `LARK_CLI_RETRIES=2`、`LARK_CLI_RETRY_DELAY_MS=1500`；仅匹配 `network/timeout/TLS handshake timeout/ECONNRESET/ETIMEDOUT/EAI_AGAIN` 等临时网络错误，不对权限、字段、参数错误重试。
+5. 飞书导出记录创建成功后，附件上传采用尽力策略：单个图片附件在重试后仍失败时不再中断整次导出，返回 `attachmentsFailed` 供前端提示；Base、表、记录创建失败仍然按失败处理。
 
 ## Git 记录
 
-- HEAD：`7e657e3 Merge pull request #10 from fuer121/codex/Prompt-upgrade`
-- 当前分支：`codex/change-dify-flow`
+- HEAD：`07bbb08 Add character Lark export`
+- 当前分支：`codex/role-stable`
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：书籍库双工作流配置、执行聚合、存储兼容、右侧对比展示、侧边栏折叠、任务详情拖拽调宽、角色筛选范围导出飞书 Base、测试与文档同步。
+- 本轮提交范围：角色底图管理页、角色底图/章节画像 SQLite 模型、管理 API、Dify role-context 只读接口、角色提取成功结果 draft 沉淀、角色底图导出飞书 Base、环境变量样例、测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -203,6 +225,9 @@
 | R-20 | 双 workflow 并行调用会把单任务 Dify 请求量翻倍 | 中 | 大批量书籍任务会同时消耗两个 workflow 的额度与上游并发能力 | 当前按用户要求并行执行；如出现限流，再切为可配置串行或工作流级限速 |
 | R-21 | 对照 workflow 输出字段若不符合既有图片字段契约 | 中 | 对照侧可能显示失败卡，但主侧成功仍会让任务继续 | 已支持 `result/result_files/files/file/image/images/image_url/image_urls/url`；失败侧保留 `raw_outputs/error` 便于追踪 |
 | R-22 | 角色导出原段落图片附件依赖 CDN 链接仍可下载 | 中 | 若原图 CDN 过期或拒绝访问，对应导出请求可能在附件上传前失败 | 当前按用户要求上传原图附件；后续如遇过期问题，可改为记录继续导出并把失败原图写入错误列 |
+| R-23 | 角色提取任务缺少 `book_id` 字段 | 中 | 自动沉淀候选无法直接参与 `book_id + role_name` workflow 匹配 | 已通过书籍库 `books.name` 和确认别名映射修复现有存量；新增未知书名仍默认沉淀为 `draft`，需在角色底图管理页确认 |
+| R-24 | Dify workflow 不能访问本地相对图片 URL 或 `localhost` | 高 | 如果 `ROLE_ASSET_PUBLIC_BASE_URL` 未配置，本地上传底图不会被 Dify 成功读取 | workflow 接口优先返回 CDN URL；本地文件参与 workflow 前必须配置可被 Dify 访问的公网/局域网稳定地址 |
+| R-25 | 飞书 OpenAPI 或本机网络偶发 TLS handshake timeout | 中 | 导出到飞书多维表格时可能中断在表字段、记录写入或附件上传阶段 | 已对 lark-cli 网络类错误增加可配置重试；若持续失败，需检查代理/网络或升级 lark-cli |
 
 ## QA-01 验收脚本
 

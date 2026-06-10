@@ -12,6 +12,8 @@ export type CharacterInputKey =
 export type CharacterColumnMapping = Record<CharacterInputKey, string>;
 
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused';
+export type RoleAssetStatus = 'draft' | 'active' | 'disabled';
+export type RoleAssetSource = 'manual' | 'character_task' | 'import';
 
 export interface ParsedSheet {
   name: string;
@@ -187,6 +189,7 @@ export interface LarkExportResult {
   createdAt: string;
   recordsCreated: number;
   attachmentsUploaded: number;
+  attachmentsFailed?: number;
 }
 
 export interface CharacterTask {
@@ -259,6 +262,54 @@ export interface CharacterJob {
   finishedAt?: string;
   tasks: CharacterTask[];
   events: CharacterJobEvent[];
+}
+
+export interface RoleAssetProfile {
+  id: string;
+  role_asset_id: string;
+  chapter_sort: number;
+  age?: string;
+  gender?: string;
+  appearance?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoleAsset {
+  id: string;
+  book_id: number;
+  novel_name?: string;
+  role_name: string;
+  image_file?: ResultFile;
+  image_url?: string;
+  default_age?: string;
+  default_gender?: string;
+  default_appearance?: string;
+  note?: string;
+  status: RoleAssetStatus;
+  source: RoleAssetSource;
+  source_task_id?: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string;
+  profiles?: RoleAssetProfile[];
+}
+
+export interface RoleContextRequest {
+  book_id: number;
+  role_title: string;
+  describe: string;
+  chapter_sort: number;
+}
+
+export interface RoleContextResponse {
+  role_url: string;
+  role_list: string[];
+  prompt: string;
+  highlight_content: string;
+  role_url_describe: string;
+  role_have_pic: string;
+  role_info: string;
 }
 
 export interface CharacterJobSummary {
