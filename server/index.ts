@@ -15,6 +15,7 @@ import {
   deleteTask,
   getBookDetail,
   getBatch,
+  getQueueHealthSnapshot,
   getTaskRuns,
   hydrateBatchesFromStore,
   listBatchesForBook,
@@ -32,6 +33,7 @@ import {
   retryTask,
   serializeBatch,
   startBatch,
+  startQueueWatchdog,
   startSelectedTasks,
   deleteStoredTask,
   subscribeBatch
@@ -40,7 +42,6 @@ import { FileUnavailableError, streamFile } from './fileStore.js';
 import { exportBatchToLark } from './lark.js';
 import { registerQualityRoutes } from './quality.js';
 import { registerCharacterRoutes } from './characterRoutes.js';
-import { getDifyWorkflowConfigs } from './dify.js';
 import { registerRoleAssetRoutes } from './roleAssetRoutes.js';
 import { registerWorkflowRoutes } from './workflowRoutes.js';
 
@@ -59,25 +60,38 @@ const upload = multer({
 
 const workbooks = new Map<string, ParsedWorkbook>();
 hydrateBatchesFromStore();
+startQueueWatchdog();
 
 app.use(cors({ origin: ['http://127.0.0.1:5173', 'http://localhost:5173'] }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
-  const difyWorkflows = getDifyWorkflowConfigs().map((workflow) => ({
-    id: workflow.id,
-    name: workflow.name,
-    configured: Boolean(workflow.apiKey),
-    responseMode: workflow.responseMode
-  }));
+  const difyWorkflows = [
+    {
+      id: 'primary',
+      name: process.env.DIFY_WORKFLOW_NAME ?? '线上工作流',
+      configured: Boolean(process.env.DIFY_API_KEY),
+      responseMode: process.env.DIFY_RESPONSE_MODE ?? null
+    },
+    {
+      id: 'compare',
+      name: process.env.DIFY_COMPARE_WORKFLOW_NAME ?? '对照工作流',
+      configured: Boolean(process.env.DIFY_COMPARE_API_KEY),
+      responseMode: process.env.DIFY_COMPARE_RESPONSE_MODE ?? null
+    }
+  ];
   res.json({
+    code: 0,
+    message: 'ok',
     ok: true,
+    queue: getQueueHealthSnapshot(),
     config: {
-      hasDifyApiKey: Boolean(process.env.DIFY_API_KEY),
+      hasDifyApiKey: difyWorkflows.some((workflow) => workflow.configured),
       difyApiBase: process.env.DIFY_API_BASE ?? null,
       difyResponseMode: process.env.DIFY_RESPONSE_MODE ?? null,
       difyWorkflowName: process.env.DIFY_WORKFLOW_NAME ?? 'LL-段落高光生图-效果测试',
       difyWorkflows,
+      workflowGroups: [],
       hasCharacterDifyApiKey: Boolean(process.env.CHARACTER_DIFY_API_KEY),
       characterDifyApiBase: process.env.CHARACTER_DIFY_API_BASE ?? process.env.DIFY_API_BASE ?? null,
       characterDifyResponseMode: process.env.CHARACTER_DIFY_RESPONSE_MODE ?? null,
@@ -124,6 +138,22 @@ function parseBookTaskFilters(query: Record<string, unknown>) {
     rowNoFrom: parseOptionalNumber(query.rowNoFrom),
     rowNoTo: parseOptionalNumber(query.rowNoTo)
   };
+}
+
+function bookTaskFilterError(filters: ReturnType<typeof parseBookTaskFilters>) {
+  if (
+    (filters.chapterSortFrom !== undefined && !Number.isFinite(filters.chapterSortFrom)) ||
+    (filters.chapterSortTo !== undefined && !Number.isFinite(filters.chapterSortTo))
+  ) {
+    return '章节序号筛选必须是数字';
+  }
+  if (
+    (filters.rowNoFrom !== undefined && !Number.isFinite(filters.rowNoFrom)) ||
+    (filters.rowNoTo !== undefined && !Number.isFinite(filters.rowNoTo))
+  ) {
+    return '行数筛选必须是数字';
+  }
+  return undefined;
 }
 
 function asyncHandler<TReq extends express.Request, TRes extends express.Response>(
@@ -358,18 +388,9 @@ app.get('/api/books/:bookId/tasks', (req, res) => {
   const filters = parseBookTaskFilters(req.query);
   const pageRaw = typeof req.query.page === 'string' && req.query.page.trim() !== '' ? Number(req.query.page) : 1;
   const pageSizeRaw = typeof req.query.pageSize === 'string' && req.query.pageSize.trim() !== '' ? Number(req.query.pageSize) : 50;
-  if (
-    (filters.chapterSortFrom !== undefined && !Number.isFinite(filters.chapterSortFrom)) ||
-    (filters.chapterSortTo !== undefined && !Number.isFinite(filters.chapterSortTo))
-  ) {
-    res.status(400).json({ error: '章节序号筛选必须是数字' });
-    return;
-  }
-  if (
-    (filters.rowNoFrom !== undefined && !Number.isFinite(filters.rowNoFrom)) ||
-    (filters.rowNoTo !== undefined && !Number.isFinite(filters.rowNoTo))
-  ) {
-    res.status(400).json({ error: '行数筛选必须是数字' });
+  const filterError = bookTaskFilterError(filters);
+  if (filterError) {
+    res.status(400).json({ error: filterError });
     return;
   }
   if (!Number.isInteger(pageRaw) || pageRaw < 1) {
@@ -451,7 +472,8 @@ app.post(
 
 app.post('/api/books/:bookId/continue', (req, res) => {
   const bookId = parseBookIdParam(req.params.bookId);
-  const batch = continueBook(bookId, parseBookTaskFilters(req.query));
+  const workflowGroupId = typeof req.body?.workflowGroupId === 'string' ? req.body.workflowGroupId : undefined;
+  const batch = continueBook(bookId, parseBookTaskFilters(req.query), { workflowGroupId });
   res.json(serializeBatch(batch));
 });
 
@@ -529,6 +551,26 @@ app.post(
     const batch = getBatch(batchId);
     if (!batch) {
       res.status(404).json({ error: '任务清单不存在' });
+      return;
+    }
+    if (typeof req.query.bookId === 'string') {
+      const bookId = parseBookIdParam(req.query.bookId);
+      const filters = {
+        ...parseBookTaskFilters(req.query),
+        batchId
+      };
+      const filterError = bookTaskFilterError(filters);
+      if (filterError) {
+        res.status(400).json({ error: filterError });
+        return;
+      }
+      const tasks = listTasksForBook(bookId, filters).filter((task) => task.batch_id === batchId);
+      if (tasks.length === 0) {
+        res.status(400).json({ error: '当前筛选范围没有可导出的任务' });
+        return;
+      }
+      const result = await exportBatchToLark({ ...batch, tasks, export: undefined });
+      res.json(result);
       return;
     }
     if (batch.export) {

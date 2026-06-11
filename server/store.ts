@@ -17,6 +17,8 @@ import type {
 import { registerStoredFile } from './fileStore.js';
 
 type SqlRow = Record<string, unknown>;
+const DEFAULT_WORKFLOW_GROUP_ID = 'default';
+const DEFAULT_WORKFLOW_GROUP_NAME = '默认分组';
 
 let db: DatabaseSync | null = null;
 let currentStorePath = '';
@@ -60,6 +62,14 @@ function defaultPrimaryWorkflowName() {
   return process.env.DIFY_WORKFLOW_NAME ?? '线上工作流';
 }
 
+function workflowGroupIdFromRow(row: SqlRow) {
+  return optionalString(row.workflow_group_id) ?? DEFAULT_WORKFLOW_GROUP_ID;
+}
+
+function workflowGroupNameFromRow(row: SqlRow) {
+  return optionalString(row.workflow_group_name) ?? DEFAULT_WORKFLOW_GROUP_NAME;
+}
+
 function registerWorkflowResultFiles(workflowResults: WorkflowResult[]) {
   for (const result of workflowResults) {
     for (const file of result.result_files) {
@@ -81,6 +91,8 @@ function legacyWorkflowResults(row: SqlRow, resultFiles: ResultFile[], rawOutput
     {
       workflow_id: 'primary',
       workflow_name: defaultPrimaryWorkflowName(),
+      workflow_group_id: workflowGroupIdFromRow(row),
+      workflow_group_name: workflowGroupNameFromRow(row),
       status: row.status === 'failed' ? 'failed' : 'succeeded',
       workflow_run_id: optionalString(row.workflow_run_id),
       dify_task_id: optionalString(row.dify_task_id),
@@ -92,6 +104,16 @@ function legacyWorkflowResults(row: SqlRow, resultFiles: ResultFile[], rawOutput
       error: optionalString(row.error)
     }
   ];
+}
+
+function normalizeWorkflowResultsGroup(row: SqlRow, results: WorkflowResult[]) {
+  const workflowGroupId = workflowGroupIdFromRow(row);
+  const workflowGroupName = workflowGroupNameFromRow(row);
+  return results.map((result) => ({
+    ...result,
+    workflow_group_id: result.workflow_group_id ?? workflowGroupId,
+    workflow_group_name: result.workflow_group_name ?? workflowGroupName
+  }));
 }
 
 export function getDb() {
@@ -174,6 +196,8 @@ export function initializeStore() {
       started_at TEXT,
       finished_at TEXT,
       elapsed_seconds REAL,
+      workflow_group_id TEXT,
+      workflow_group_name TEXT,
       workflow_run_id TEXT,
       dify_task_id TEXT,
       progress_percent REAL,
@@ -214,6 +238,8 @@ export function initializeStore() {
       started_at TEXT,
       finished_at TEXT,
       elapsed_seconds REAL,
+      workflow_group_id TEXT,
+      workflow_group_name TEXT,
       workflow_run_id TEXT,
       dify_task_id TEXT,
       is_valid_json TEXT,
@@ -266,6 +292,18 @@ export function initializeStore() {
   }
   if (!columnExists('task_runs', 'workflow_results_json')) {
     database.exec("ALTER TABLE task_runs ADD COLUMN workflow_results_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!columnExists('tasks', 'workflow_group_id')) {
+    database.exec('ALTER TABLE tasks ADD COLUMN workflow_group_id TEXT');
+  }
+  if (!columnExists('tasks', 'workflow_group_name')) {
+    database.exec('ALTER TABLE tasks ADD COLUMN workflow_group_name TEXT');
+  }
+  if (!columnExists('task_runs', 'workflow_group_id')) {
+    database.exec('ALTER TABLE task_runs ADD COLUMN workflow_group_id TEXT');
+  }
+  if (!columnExists('task_runs', 'workflow_group_name')) {
+    database.exec('ALTER TABLE task_runs ADD COLUMN workflow_group_name TEXT');
   }
 }
 
@@ -359,6 +397,50 @@ export function saveBatch(batch: Batch) {
   });
 }
 
+export function saveBatchState(batch: Batch) {
+  getDb()
+    .prepare(
+      `
+      INSERT INTO batches (
+        id, workbook_id, sheet_name, file_name, mapping_json, row_limit, status,
+        created_at, updated_at, started_at, finished_at, pause_requested, export_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        workbook_id = excluded.workbook_id,
+        sheet_name = excluded.sheet_name,
+        file_name = excluded.file_name,
+        mapping_json = excluded.mapping_json,
+        row_limit = excluded.row_limit,
+        status = excluded.status,
+        updated_at = excluded.updated_at,
+        started_at = excluded.started_at,
+        finished_at = excluded.finished_at,
+        pause_requested = excluded.pause_requested,
+        export_json = excluded.export_json
+    `
+    )
+    .run(
+      batch.id,
+      batch.workbookId,
+      batch.sheetName,
+      batch.fileName,
+      json(batch.mapping),
+      batch.rowLimit ?? null,
+      batch.status,
+      batch.createdAt,
+      batch.updatedAt,
+      batch.startedAt ?? null,
+      batch.finishedAt ?? null,
+      boolNumber(batch.pauseRequested),
+      batch.export ? json(batch.export) : null
+    );
+
+  for (const event of batch.events) {
+    saveEventRow(batch.id, event);
+  }
+}
+
 export function updateBatchFileName(batchId: string, fileName: string) {
   const trimmed = fileName.trim();
   if (!trimmed) throw new Error('任务清单名称不能为空');
@@ -382,12 +464,12 @@ function saveTaskRow(task: BatchTask, batchId: string | null, sourceKind: string
       `
       INSERT INTO tasks (
         id, batch_id, row_no, book_id, paragraph_content, chapter_sort, status, attempts,
-        started_at, finished_at, elapsed_seconds, workflow_run_id, dify_task_id, progress_percent,
+        started_at, finished_at, elapsed_seconds, workflow_group_id, workflow_group_name, workflow_run_id, dify_task_id, progress_percent,
         progress_label, pause_reason, stop_requested_at, is_valid_json, paragraph_description,
         role_json, title, result_files_json, workflow_results_json, result_text, raw_outputs_json, error, source_kind,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         batch_id = COALESCE(tasks.batch_id, excluded.batch_id),
         row_no = excluded.row_no,
@@ -399,6 +481,8 @@ function saveTaskRow(task: BatchTask, batchId: string | null, sourceKind: string
         started_at = excluded.started_at,
         finished_at = excluded.finished_at,
         elapsed_seconds = excluded.elapsed_seconds,
+        workflow_group_id = excluded.workflow_group_id,
+        workflow_group_name = excluded.workflow_group_name,
         workflow_run_id = excluded.workflow_run_id,
         dify_task_id = excluded.dify_task_id,
         progress_percent = excluded.progress_percent,
@@ -434,6 +518,8 @@ function saveTaskRow(task: BatchTask, batchId: string | null, sourceKind: string
       task.started_at ?? null,
       task.finished_at ?? null,
       task.elapsed_seconds ?? null,
+      task.workflow_group_id ?? null,
+      task.workflow_group_name ?? null,
       task.workflow_run_id ?? null,
       task.dify_task_id ?? null,
       task.progress_percent ?? null,
@@ -498,10 +584,10 @@ export function recordTaskRun(task: BatchTask) {
       `
       INSERT INTO task_runs (
         id, task_id, attempt_no, status, started_at, finished_at, elapsed_seconds,
-        workflow_run_id, dify_task_id, is_valid_json, result_files_json, workflow_results_json, result_text,
+        workflow_group_id, workflow_group_name, workflow_run_id, dify_task_id, is_valid_json, result_files_json, workflow_results_json, result_text,
         raw_outputs_json, error, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -512,6 +598,8 @@ export function recordTaskRun(task: BatchTask) {
       task.started_at ?? null,
       task.finished_at ?? null,
       task.elapsed_seconds ?? null,
+      task.workflow_group_id ?? null,
+      task.workflow_group_name ?? null,
       task.workflow_run_id ?? null,
       task.dify_task_id ?? null,
       task.is_valid === undefined ? null : json(task.is_valid),
@@ -529,7 +617,7 @@ function taskFromRow(row: SqlRow): BatchTask {
   const rawOutputs = parseJson(row.raw_outputs_json, undefined);
   const parsedWorkflowResults = parseJson<WorkflowResult[]>(row.workflow_results_json, []);
   const workflowResults =
-    parsedWorkflowResults.length > 0 ? parsedWorkflowResults : legacyWorkflowResults(row, resultFiles, rawOutputs);
+    parsedWorkflowResults.length > 0 ? normalizeWorkflowResultsGroup(row, parsedWorkflowResults) : legacyWorkflowResults(row, resultFiles, rawOutputs);
   const task: BatchTask = {
     id: String(row.id),
     batch_id: optionalString(row.batch_id),
@@ -545,6 +633,8 @@ function taskFromRow(row: SqlRow): BatchTask {
     started_at: optionalString(row.started_at),
     finished_at: optionalString(row.finished_at),
     elapsed_seconds: optionalNumber(row.elapsed_seconds),
+    workflow_group_id: workflowGroupIdFromRow(row),
+    workflow_group_name: workflowGroupNameFromRow(row),
     workflow_run_id: optionalString(row.workflow_run_id),
     dify_task_id: optionalString(row.dify_task_id),
     progress_percent: optionalNumber(row.progress_percent),
@@ -824,7 +914,7 @@ export function listTaskRuns(taskId: string): TaskRunRecord[] {
       const rawOutputs = parseJson(row.raw_outputs_json, undefined);
       const parsedWorkflowResults = parseJson<WorkflowResult[]>(row.workflow_results_json, []);
       const workflowResults =
-        parsedWorkflowResults.length > 0 ? parsedWorkflowResults : legacyWorkflowResults(row, resultFiles, rawOutputs);
+        parsedWorkflowResults.length > 0 ? normalizeWorkflowResultsGroup(row, parsedWorkflowResults) : legacyWorkflowResults(row, resultFiles, rawOutputs);
       for (const file of resultFiles) {
         registerStoredFile(file);
       }
@@ -837,6 +927,8 @@ export function listTaskRuns(taskId: string): TaskRunRecord[] {
         started_at: optionalString(row.started_at),
         finished_at: optionalString(row.finished_at),
         elapsed_seconds: optionalNumber(row.elapsed_seconds),
+        workflow_group_id: workflowGroupIdFromRow(row),
+        workflow_group_name: workflowGroupNameFromRow(row),
         workflow_run_id: optionalString(row.workflow_run_id),
         dify_task_id: optionalString(row.dify_task_id),
         is_valid: parseJson(row.is_valid_json, undefined),

@@ -15,13 +15,26 @@ export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused
 export type RoleAssetStatus = 'draft' | 'active' | 'disabled';
 export type RoleAssetSource = 'manual' | 'character_task' | 'import';
 export type ManagedWorkflowId = 'primary' | 'compare';
+export type WorkflowGroupStatus = 'active' | 'disabled';
 
 export interface ManagedWorkflowConfig {
   id: ManagedWorkflowId;
+  group_id?: string;
   name: string;
   api_key?: string;
   console_url?: string;
   note?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManagedWorkflowGroup {
+  id: string;
+  name: string;
+  status: WorkflowGroupStatus;
+  is_default: boolean;
+  note?: string;
+  workflows: ManagedWorkflowConfig[];
   created_at: string;
   updated_at: string;
 }
@@ -57,6 +70,8 @@ export interface ResultFile {
 }
 
 export interface WorkflowResult {
+  workflow_group_id?: string;
+  workflow_group_name?: string;
   workflow_id: string;
   workflow_name: string;
   status: 'running' | 'succeeded' | 'failed';
@@ -77,6 +92,8 @@ export interface BatchTask {
   id: string;
   batch_id?: string;
   source_kind?: string;
+  workflow_group_id?: string;
+  workflow_group_name?: string;
   row_no: number;
   input: {
     book_id: number;
@@ -145,6 +162,8 @@ export interface TaskRunRecord {
   task_id: string;
   attempt_no: number;
   status: TaskStatus;
+  workflow_group_id?: string;
+  workflow_group_name?: string;
   started_at?: string;
   finished_at?: string;
   elapsed_seconds?: number;

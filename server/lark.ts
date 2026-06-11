@@ -22,6 +22,12 @@ interface AttachmentUploadSummary {
   failed: number;
 }
 
+interface WorkflowExportColumn {
+  workflowId: string;
+  workflowName: string;
+  fieldName: string;
+}
+
 function asIdentityArg() {
   const value = process.env.LARK_CLI_AS || 'user';
   return ['--as', value];
@@ -379,6 +385,48 @@ function roleAssetPortraitFile(asset: RoleAsset) {
   return registerRemoteFile(asset.id, asset.image_url, `${asset.role_name}.png`);
 }
 
+function workflowExportColumns(batch: Batch): WorkflowExportColumn[] {
+  const orderedWorkflowIds = ['primary', 'compare'];
+  const results = batch.tasks.flatMap((task) => task.workflow_results ?? []);
+  const selected = [
+    ...orderedWorkflowIds
+      .map((workflowId) => results.find((result) => result.workflow_id === workflowId))
+      .filter((result): result is NonNullable<typeof result> => Boolean(result)),
+    ...results.filter((result) => !orderedWorkflowIds.includes(result.workflow_id))
+  ];
+  const usedWorkflowIds = new Set<string>();
+  const usedFieldNames = new Set<string>(TABLE_FIELDS.map((field) => field.name));
+  const columns: WorkflowExportColumn[] = [];
+
+  for (const result of selected) {
+    if (usedWorkflowIds.has(result.workflow_id)) continue;
+    usedWorkflowIds.add(result.workflow_id);
+    const baseName = result.workflow_name.trim() || result.workflow_id;
+    let fieldName = baseName;
+    let suffix = 2;
+    while (usedFieldNames.has(fieldName)) {
+      fieldName = `${baseName} ${suffix}`;
+      suffix += 1;
+    }
+    usedFieldNames.add(fieldName);
+    columns.push({
+      workflowId: result.workflow_id,
+      workflowName: result.workflow_name,
+      fieldName
+    });
+  }
+
+  return columns;
+}
+
+function batchTableFields(batch: Batch) {
+  const workflowFields = workflowExportColumns(batch).map((column) => ({ name: column.fieldName, type: 'attachment' }));
+  if (workflowFields.length === 0) return TABLE_FIELDS;
+  const resultImageIndex = TABLE_FIELDS.findIndex((field) => field.name === '结果图片');
+  if (resultImageIndex < 0) return [...TABLE_FIELDS, ...workflowFields];
+  return [...TABLE_FIELDS.slice(0, resultImageIndex + 1), ...workflowFields, ...TABLE_FIELDS.slice(resultImageIndex + 1)];
+}
+
 async function createBase(name: string) {
   const result = await runLark(['base', '+base-create', ...asIdentityArg(), '--name', name, '--time-zone', 'Asia/Shanghai']);
   const info = extractBaseInfo(result.json);
@@ -391,8 +439,8 @@ async function createBase(name: string) {
   };
 }
 
-async function createTable(baseToken: string, tableName: string) {
-  return createTableWithFields(baseToken, tableName, TABLE_FIELDS);
+async function createTable(baseToken: string, tableName: string, batch: Batch) {
+  return createTableWithFields(baseToken, tableName, batchTableFields(batch));
 }
 
 async function createTableWithFields(baseToken: string, tableName: string, fields: unknown[]) {
@@ -538,15 +586,29 @@ async function uploadRoleAssetAttachments(baseToken: string, tableId: string, as
 
 async function uploadAttachments(baseToken: string, tableId: string, batch: Batch, recordIds: string[]) {
   const summary: AttachmentUploadSummary = { uploaded: 0, failed: 0 };
+  const workflowColumns = workflowExportColumns(batch);
   for (let index = 0; index < batch.tasks.length; index += 1) {
     const task = batch.tasks[index];
     const recordId = recordIds[index];
-    if (!recordId || task.result_files.length === 0) continue;
+    if (!recordId) continue;
     for (const file of task.result_files) {
       if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '结果图片', file)) {
         summary.uploaded += 1;
       } else {
         summary.failed += 1;
+      }
+    }
+    for (const result of task.workflow_results ?? []) {
+      const column =
+        workflowColumns.find((item) => item.workflowId === result.workflow_id && item.workflowName === result.workflow_name) ??
+        workflowColumns.find((item) => item.workflowId === result.workflow_id);
+      if (!column) continue;
+      for (const file of result.result_files) {
+        if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, column.fieldName, file)) {
+          summary.uploaded += 1;
+        } else {
+          summary.failed += 1;
+        }
       }
     }
   }
@@ -624,7 +686,7 @@ export async function exportBatchToLark(batch: Batch): Promise<LarkExportResult>
   const baseName = `Dify 批量结果 ${larkDate()}`;
   const tableName = '批量结果';
   const { baseToken, baseUrl } = await createBase(baseName);
-  const tableId = await createTable(baseToken, tableName);
+  const tableId = await createTable(baseToken, tableName, batch);
   const recordIds = await batchCreateRecords(baseToken, tableId, batch);
   const attachments = await uploadAttachments(baseToken, tableId, batch, recordIds);
 
