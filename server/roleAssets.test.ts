@@ -47,6 +47,7 @@ describe('role asset workflow context', () => {
     delete process.env.BATCH_STORE_PATH;
     delete process.env.ROLE_ASSET_API_TOKEN;
     delete process.env.ROLE_ASSET_PUBLIC_BASE_URL;
+    delete process.env.LARK_ATTACHMENT_CONCURRENCY;
   });
 
   it('returns old node compatible fields for an active single-role asset', () => {
@@ -291,6 +292,70 @@ describe('role asset workflow context', () => {
     expect(larkCalls.filter((call) => call.args.includes('+record-upload-attachment')).map((call) => call.args[call.args.indexOf('--field-id') + 1])).toEqual([
       '角色立绘图'
     ]);
+  });
+
+  it('uploads role asset portrait attachments with bounded concurrency', async () => {
+    process.env.LARK_ATTACHMENT_CONCURRENCY = '3';
+    const assets = Array.from({ length: 4 }, (_, index) =>
+      createRoleAsset({
+        book_id: 1721648,
+        novel_name: '第一瞳术师',
+        role_name: `角色${index + 1}`,
+        image_file: {
+          id: `role-portrait-${index + 1}`,
+          taskId: `role-task-${index + 1}`,
+          name: `portrait-${index + 1}.png`,
+          mimeType: 'image/png',
+          previewUrl: `/api/files/role-portrait-${index + 1}`,
+          localPath: path.join(os.tmpdir(), `portrait-${index + 1}.png`),
+          sourceKind: 'local'
+        },
+        status: 'active',
+        source: 'manual'
+      })
+    );
+
+    let activeUploads = 0;
+    let maxUploads = 0;
+    const runner: LarkCliRunner = async (args) => {
+      if (args.includes('+base-create')) {
+        const json = { data: { app_token: 'base-token', url: 'https://feishu.example/base/base-token' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+table-create')) {
+        const json = { data: { table_id: 'tblRoleAssets' } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-batch-create')) {
+        const json = { data: { record_id_list: assets.map((_, index) => `recRoleAsset${index + 1}`) } };
+        return { stdout: JSON.stringify(json), stderr: '', json };
+      }
+      if (args.includes('+record-upload-attachment')) {
+        activeUploads += 1;
+        maxUploads = Math.max(maxUploads, activeUploads);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        activeUploads -= 1;
+      }
+      return { stdout: '{}', stderr: '' };
+    };
+    __setLarkCliRunnerForTest(runner);
+
+    await withRoleAssetApp(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/role-assets/export/lark`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetIds: assets.map((asset) => asset.id) })
+      });
+      expect(response.status).toBe(200);
+      const result = await response.json();
+      expect(result).toMatchObject({
+        recordsCreated: 4,
+        attachmentsUploaded: 4,
+        attachmentsFailed: 0
+      });
+    });
+
+    expect(maxUploads).toBe(3);
   });
 
   it('rejects empty and unknown role asset export ids without calling Lark', async () => {

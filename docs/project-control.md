@@ -203,16 +203,20 @@
 11. Workflow 管理的“工作流地址”字段定义为 Dify 控制台地址，只用于记录和跳转，不参与后端 `/workflows/run` API 请求。
 12. 书籍库总体暂停/取消的控制范围固定为当前已点击“查询”后生效的任务列表范围，与“执行生图”一致，不使用未查询的筛选草稿。
 13. 书籍库总体取消不新增 `canceled` 状态；取消仅停止并移除当前范围内 `queued/running/paused` 任务，保留 `succeeded/failed` 任务和历史运行记录。
+14. 角色底图管理导出飞书排查结论：飞书 Base/表/记录/附件链路可用；历史一次失败对应服务重启导致 `/api/role-assets/export/lark` 代理 `socket hang up`，不是字段或鉴权错误。
+15. 角色底图导出附件上传由串行改为受控并发，默认 `LARK_ATTACHMENT_CONCURRENCY=4`；单个附件失败仍按既有尽力策略计入 `attachmentsFailed`，不打断已创建的 Base/记录。
+16. 角色底图导出按钮在导出中展示当前导出条数，并提示“创建飞书 Base 并上传附件期间需保持服务运行”，避免长导出被误判为无响应。
+17. 书籍库执行中轮询刷新任务列表时，不再复用“查询”按钮的 loading 状态；查询按钮只反映用户手动查询/分页/切换范围触发的任务加载，不与任务执行状态绑定。
 
 ## Git 记录
 
-- HEAD：`9ad35b8 Merge pull request #14 from fuer121/codex/character-continue-pending`
-- 主线基线：`origin/main` 已到 `9ad35b8 Merge pull request #14 from fuer121/codex/character-continue-pending`
-- 当前分支：`codex/workflow-management`
+- HEAD：`66d4133 Merge pull request #15 from fuer121/codex/workflow-management`
+- 主线基线：`origin/main` 已到 `66d4133 Merge pull request #15 from fuer121/codex/workflow-management`
+- 当前分支：`codex/feishu`
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：Workflow 管理页面、`workflow_configs` SQLite 配置、`/api/workflows`、书籍库 Dify 调用读取持久化名称/API key、书籍库总体暂停/取消、测试与文档同步。
+- 本轮提交范围：角色底图管理导出飞书稳定性修复、书籍库查询按钮与执行轮询解耦、附件上传并发配置、前端导出反馈、测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -244,6 +248,8 @@
 | R-23 | 角色提取任务缺少 `book_id` 字段 | 中 | 自动沉淀候选无法直接参与 `book_id + role_name` workflow 匹配 | 已通过书籍库 `books.name` 和确认别名映射修复现有存量；新增未知书名仍默认沉淀为 `draft`，需在角色底图管理页确认 |
 | R-24 | Dify workflow 不能访问本地相对图片 URL 或 `localhost` | 高 | 如果 `ROLE_ASSET_PUBLIC_BASE_URL` 未配置，本地上传底图不会被 Dify 成功读取 | workflow 接口优先返回 CDN URL；本地文件参与 workflow 前必须配置可被 Dify 访问的公网/局域网稳定地址 |
 | R-25 | 飞书 OpenAPI 或本机网络偶发 TLS handshake timeout | 中 | 导出到飞书多维表格时可能中断在表字段、记录写入或附件上传阶段 | 已对 lark-cli 网络类错误增加可配置重试；若持续失败，需检查代理/网络或升级 lark-cli |
+| R-26 | 角色底图全量导出附件较多，导出期间服务重启会中断 HTTP 请求 | 中 | 已创建的飞书 Base 可能存在，但前端会显示导出失败 | 已把附件上传改为默认 4 并发并增强前端导出中提示；导出期间仍需避免重启服务 |
+| R-27 | 书籍库执行中后台轮询可能被误认为用户点击了“查询” | 低 | 用户会误判查询按钮和任务执行状态存在绑定 | 已拆分后台刷新与手动查询 loading；轮询继续更新列表，但不禁用/转动查询按钮 |
 
 ## QA-01 验收脚本
 

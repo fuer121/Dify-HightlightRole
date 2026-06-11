@@ -68,6 +68,17 @@ const batchesPayload = {
   ]
 };
 
+const runningBatchesPayload = {
+  batches: [
+    {
+      ...batchesPayload.batches[0],
+      status: 'running',
+      running_count: 1
+    },
+    batchesPayload.batches[1]
+  ]
+};
+
 const tasksPayload = {
   tasks: [
     {
@@ -118,6 +129,18 @@ const tasksPayload = {
     totalPages: 1,
     runnableTotal: 2
   }
+};
+
+const runningTasksPayload = {
+  ...tasksPayload,
+  tasks: [
+    {
+      ...tasksPayload.tasks[0],
+      status: 'running',
+      progress_label: 'HTTP 请求'
+    },
+    tasksPayload.tasks[1]
+  ]
 };
 
 const continuePayload = {
@@ -234,6 +257,7 @@ describe('BooksManagementPage continue scope', () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await act(async () => {
       root.unmount();
     });
@@ -446,6 +470,64 @@ describe('BooksManagementPage continue scope', () => {
       .map(([url]) => String(url))
       .filter((url) => url.includes('/api/books/1/continue'));
     expect(continueCalls.at(-1)).toBe('/api/books/1/continue?status=succeeded&batchId=batch-1');
+  });
+
+  it('does not put the search button into loading state during running-task polling', async () => {
+    let deferNextTaskFetch = false;
+    let resolveDeferredTaskFetch: (() => void) | undefined;
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/health')) return jsonResponse({ config: { difyWorkflowName: '测试工作流' } });
+      if (url.endsWith('/api/books')) return jsonResponse(booksPayload);
+      if (url.endsWith('/api/books/1/batches')) return jsonResponse(runningBatchesPayload);
+      if (url.includes('/api/books/1/tasks')) {
+        if (deferNextTaskFetch) {
+          deferNextTaskFetch = false;
+          return new Promise<Response>((resolve) => {
+            resolveDeferredTaskFetch = () => resolve(jsonResponse(runningTasksPayload));
+          });
+        }
+        return jsonResponse(runningTasksPayload);
+      }
+      if (url.endsWith('/api/tasks/task-1/runs')) return jsonResponse({ runs: [] });
+      if (url.endsWith('/api/tasks/task-2/runs')) return jsonResponse({ runs: [] });
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    vi.useFakeTimers();
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const searchButton = findButton(container, '查询');
+    expect(searchButton.disabled).toBe(false);
+    expect(searchButton.textContent).toContain('查询');
+
+    deferNextTaskFetch = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(searchButton.disabled).toBe(false);
+    expect(searchButton.textContent).toContain('查询');
+
+    await act(async () => {
+      resolveDeferredTaskFetch?.();
+      await Promise.resolve();
+    });
   });
 
   it('loads a switched batch with its own saved scope instead of the previous render draft', async () => {

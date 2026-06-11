@@ -67,8 +67,27 @@ function readLarkCliRetryDelayMs() {
   return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 1500;
 }
 
+function readLarkAttachmentConcurrency() {
+  const value = Number(process.env.LARK_ATTACHMENT_CONCURRENCY ?? 4);
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 4;
+}
+
 function delay(ms: number) {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+async function forEachWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  let cursor = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const item = items[cursor];
+        cursor += 1;
+        await worker(item);
+      }
+    })
+  );
 }
 
 function isRetryableLarkCliError(error: unknown) {
@@ -498,17 +517,22 @@ async function roleAssetBatchCreateRecords(baseToken: string, tableId: string, a
 
 async function uploadRoleAssetAttachments(baseToken: string, tableId: string, assets: RoleAsset[], recordIds: string[]) {
   const summary: AttachmentUploadSummary = { uploaded: 0, failed: 0 };
+  const jobs: Array<{ recordId: string; file: ResultFile }> = [];
   for (let index = 0; index < assets.length; index += 1) {
     const recordId = recordIds[index];
     if (!recordId) continue;
     const portraitFile = roleAssetPortraitFile(assets[index]);
     if (!portraitFile) continue;
-    if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '角色立绘图', portraitFile)) {
+    jobs.push({ recordId, file: portraitFile });
+  }
+
+  await forEachWithConcurrency(jobs, readLarkAttachmentConcurrency(), async ({ recordId, file }) => {
+    if (await uploadFileAttachmentSafely(baseToken, tableId, recordId, '角色立绘图', file)) {
       summary.uploaded += 1;
     } else {
       summary.failed += 1;
     }
-  }
+  });
   return summary;
 }
 

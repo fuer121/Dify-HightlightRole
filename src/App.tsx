@@ -50,6 +50,10 @@ type TaskQueryOverrides = Partial<RangeFilterState> & {
   valueStatus?: ValueStatusFilter;
 };
 
+type LoadBookTasksOptions = {
+  showLoading?: boolean;
+};
+
 interface ParsedSheet {
   name: string;
   headers: string[];
@@ -2202,14 +2206,16 @@ function BooksManagementPage({
     taskListId = selectedBatchId,
     overrides: TaskQueryOverrides = {},
     pageSize = taskPageSize,
-    baseQueryState = taskQueryStateForScope(bookId, taskListId)
+    baseQueryState = taskQueryStateForScope(bookId, taskListId),
+    options: LoadBookTasksOptions = {}
   ) {
+    const showLoading = options.showLoading ?? true;
     if (!bookId) {
       setTasks([]);
       setTaskPagination({ page: 1, pageSize, total: 0, totalPages: 1, runnableTotal: 0 });
       return;
     }
-    setLoadingTasks(true);
+    if (showLoading) setLoadingTasks(true);
     setError(null);
     try {
       const nextQueryState = buildTaskQueryState(baseQueryState, overrides);
@@ -2228,7 +2234,7 @@ function BooksManagementPage({
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '加载任务失败');
     } finally {
-      setLoadingTasks(false);
+      if (showLoading) setLoadingTasks(false);
     }
   }
 
@@ -2315,7 +2321,9 @@ function BooksManagementPage({
     if (!selectedBook?.book_id || selectedBatchId === 'all' || !selectedBatchIsRunning) return undefined;
     const timer = window.setInterval(() => {
       void loadBookBatches(selectedBook.book_id);
-      void loadBookTasks(selectedBook.book_id, taskPage, selectedBatchId);
+      void loadBookTasks(selectedBook.book_id, taskPage, selectedBatchId, {}, taskPageSize, taskQueryStateForScope(selectedBook.book_id, selectedBatchId), {
+        showLoading: false
+      });
     }, 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

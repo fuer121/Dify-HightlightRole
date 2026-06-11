@@ -325,8 +325,9 @@ export function RoleAssetManagementPage() {
             <Database size={15} /> {isBackfilling ? '导入中' : '导入存量立绘'}
           </button>
           <button className="secondary-button full-width-button" onClick={exportRoleAssets} disabled={isExporting || assets.length === 0}>
-            <Database size={15} /> {isExporting ? '导出中' : '导出飞书'}
+            <Database size={15} /> {isExporting ? `导出中（${assets.length} 条）` : '导出飞书'}
           </button>
+          {isExporting && <p className="inline-hint">正在创建飞书 Base 并上传 {assets.length} 个角色底图附件，请保持服务运行。</p>}
           {notice && <p className="inline-success">{notice}</p>}
           {exportResult && (
             <p className="inline-success">
