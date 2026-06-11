@@ -2195,7 +2195,27 @@ select {
 }
 
 .book-task-toolbar {
-  grid-template-columns: minmax(130px, 160px) minmax(240px, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.workflow-group-select span {
+  align-items: center;
+  color: #657084;
+  display: flex;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.inline-copy-button {
+  background: transparent;
+  border: 0;
+  color: #2870ea;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 0;
 }
 
 .book-task-table {
@@ -2645,6 +2665,15 @@ select {
   white-space: pre-wrap;
 }
 
+.workflow-description-output {
+  background: #f8fafc;
+  margin-top: 10px;
+}
+
+.workflow-description-output p {
+  max-height: 140px;
+}
+
 .image-grid {
   display: grid;
   gap: 8px;
@@ -3072,6 +3101,50 @@ select {
   margin: 8px 0 0;
 }
 
+.book-export-success {
+  align-items: center;
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  border-radius: 12px;
+  display: flex;
+  gap: 8px;
+  margin: 0 16px 12px;
+  padding: 10px 12px;
+}
+
+.book-export-success a {
+  color: #05603a;
+  text-decoration: underline;
+}
+
+.workflow-task-thumb {
+  height: 54px;
+  width: 54px;
+}
+
+.workflow-task-empty {
+  align-items: center;
+  background: #f1f5fb;
+  border-radius: 999px;
+  color: #657084;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  justify-content: center;
+  min-width: 48px;
+  padding: 6px 10px;
+}
+
+.workflow-task-empty.running {
+  background: #fff7e8;
+  color: #b54708;
+}
+
+.workflow-task-empty.failed {
+  background: #fff1f1;
+  color: #b42318;
+}
+
 .inline-hint {
   color: #667085;
   font-size: 12px;
@@ -3328,6 +3401,137 @@ select {
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workflow-group-layout {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+}
+
+.workflow-group-sidebar,
+.workflow-group-detail {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.workflow-group-create,
+.workflow-group-card {
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.workflow-group-create strong {
+  color: #172033;
+  font-size: 16px;
+}
+
+.workflow-group-create input,
+.workflow-group-create textarea,
+.workflow-group-form input,
+.workflow-group-form select,
+.workflow-group-form textarea {
+  background: #fff;
+  border: 1px solid #d9e2ef;
+  border-radius: 12px;
+  color: #172033;
+  font: inherit;
+  font-weight: 750;
+  padding: 11px 12px;
+  width: 100%;
+}
+
+.workflow-group-create textarea,
+.workflow-group-form textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.workflow-group-create button,
+.workflow-save-button {
+  align-items: center;
+  background: #2870ea;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 900;
+  gap: 8px;
+  justify-content: center;
+  padding: 11px 16px;
+}
+
+.workflow-group-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workflow-group-list button {
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 14px;
+  color: #172033;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  text-align: left;
+}
+
+.workflow-group-list button.active {
+  border-color: #2870ea;
+  box-shadow: 0 0 0 3px rgba(40, 112, 234, 0.12);
+}
+
+.workflow-group-list span,
+.workflow-group-list small,
+.workflow-group-meta span {
+  color: #657084;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workflow-group-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workflow-group-meta code {
+  background: #f1f5fb;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  color: #172033;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 6px 10px;
+}
+
+.workflow-group-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(160px, 1fr) minmax(120px, 160px);
+}
+
+.workflow-group-form label {
+  color: #657084;
+  display: grid;
+  font-size: 13px;
+  font-weight: 850;
+  gap: 8px;
+}
+
+.workflow-group-form label:last-child {
+  grid-column: 1 / -1;
 }
 
 .workflow-config-card {
@@ -4091,6 +4295,8 @@ select {
   .books-layout,
   .books-detail,
   .quality-layout,
+  .workflow-group-layout,
+  .workflow-group-form,
   .workflow-config-grid {
     grid-template-columns: 1fr;
   }

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { getFile } from './fileStore.js';
 import type { ParsedWorkbook } from './types.js';
 import {
+  __resetQueueForTest,
   __setWorkflowControlsForTest,
   addManualBookTask,
   continueBook,
@@ -11,6 +12,7 @@ import {
   createBatch,
   deleteBatch,
   deleteTask,
+  getQueueHealthSnapshot,
   getTaskRuns,
   hydrateBatchesFromStore,
   listBatchesForBook,
@@ -18,6 +20,7 @@ import {
   listTasksForBook,
   pauseBookTasks,
   pauseTask,
+  runQueueWatchdogOnce,
   renameBatch,
   renameBook,
   retryTask,
@@ -25,6 +28,7 @@ import {
   startSelectedTasks
 } from './queue.js';
 import { closeStoreForTest, getDb, saveBatch } from './store.js';
+import { createWorkflowGroup, updateWorkflowGroupWorkflow } from './workflowConfigs.js';
 
 const workbook: ParsedWorkbook = {
   id: 'workbook-1',
@@ -48,6 +52,7 @@ const workbook: ParsedWorkbook = {
 
 describe('queue', () => {
   afterEach(() => {
+    __resetQueueForTest();
     __setWorkflowControlsForTest();
     closeStoreForTest();
   });
@@ -119,9 +124,9 @@ describe('queue', () => {
   });
 
   it('stops every known workflow task id when pausing a running dual-workflow task', async () => {
-    const stopped: Array<{ taskId: string; workflowId?: string }> = [];
-    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId) => {
-      stopped.push({ taskId, workflowId });
+    const stopped: Array<{ taskId: string; workflowId?: string; workflowGroupId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId, workflowGroupId) => {
+      stopped.push({ taskId, workflowId, workflowGroupId });
       return {};
     });
     const batch = makeBatch();
@@ -132,6 +137,7 @@ describe('queue', () => {
       {
         workflow_id: 'primary',
         workflow_name: '线上工作流',
+        workflow_group_id: 'group-a',
         status: 'running',
         dify_task_id: 'primary-task',
         result_files: []
@@ -139,6 +145,7 @@ describe('queue', () => {
       {
         workflow_id: 'compare',
         workflow_name: '对照工作流',
+        workflow_group_id: 'group-a',
         status: 'running',
         dify_task_id: 'compare-task',
         result_files: []
@@ -148,8 +155,8 @@ describe('queue', () => {
     await pauseTask(batch.id, task.id);
 
     expect(stopped).toEqual([
-      { taskId: 'primary-task', workflowId: 'primary' },
-      { taskId: 'compare-task', workflowId: 'compare' }
+      { taskId: 'primary-task', workflowId: 'primary', workflowGroupId: 'group-a' },
+      { taskId: 'compare-task', workflowId: 'compare', workflowGroupId: 'group-a' }
     ]);
     expect(task.stop_requested_at).toBeTruthy();
   });
@@ -451,6 +458,8 @@ describe('queue', () => {
     });
 
     const first = makeBatch();
+    const group = createWorkflowGroup({ id: 'book-group', name: '书籍分组' });
+    updateWorkflowGroupWorkflow(group.id, 'primary', { name: '书籍主流程', api_key: 'app-book-primary' });
     const second = createBatch(
       {
         ...workbook,
@@ -471,13 +480,67 @@ describe('queue', () => {
       }
     );
 
-    const batch = continueBook(1, { batchId: second.id });
+    const batch = continueBook(1, { batchId: second.id }, { workflowGroupId: group.id });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(batch.id).toBe(second.id);
     expect(batch.tasks.map((task) => task.id)).toEqual([second.tasks[0].id]);
+    expect(batch.tasks[0].workflow_group_id).toBe(group.id);
+    expect(batch.tasks[0].workflow_group_name).toBe(group.name);
     expect(ranRows).toEqual([9]);
     expect(listTasksForBook(1, { batchId: first.id })[0].status).toBe('queued');
+  });
+
+  it('does not change another book tasks when continuing one book from a shared batch', async () => {
+    const ranBookIds: number[] = [];
+    __setWorkflowControlsForTest(async (task) => {
+      ranBookIds.push(task.input.book_id);
+      return {
+        workflowRunId: `run-${task.input.book_id}-${task.row_no}`,
+        taskId: `task-${task.input.book_id}-${task.row_no}`,
+        outputs: { title: `标题 ${task.row_no}` },
+        raw: {}
+      };
+    });
+
+    const batch = makeBatch();
+
+    continueBook(1, { batchId: batch.id });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ranBookIds).toEqual([1]);
+    expect(listTasksForBook(1, { batchId: batch.id }).map((task) => task.status)).toEqual(['succeeded']);
+    expect(listTasksForBook(2, { batchId: batch.id }).map((task) => task.status)).toEqual(['queued']);
+  });
+
+  it('preserves task-level workflow group bindings when continuing a mixed scope', async () => {
+    const observedGroups: Array<string | undefined> = [];
+    __setWorkflowControlsForTest(async (task) => {
+      observedGroups.push(task.workflow_group_id);
+      return {
+        workflowRunId: `run-${task.row_no}`,
+        taskId: `task-${task.row_no}`,
+        outputs: { title: `标题 ${task.row_no}` },
+        raw: {}
+      };
+    });
+
+    const groupA = createWorkflowGroup({ id: 'group-a', name: '分组 A' });
+    updateWorkflowGroupWorkflow(groupA.id, 'primary', { name: 'A 主流程', api_key: 'app-a-primary' });
+    const groupB = createWorkflowGroup({ id: 'group-b', name: '分组 B' });
+    updateWorkflowGroupWorkflow(groupB.id, 'primary', { name: 'B 主流程', api_key: 'app-b-primary' });
+    const batch = makeBookBatch();
+    batch.tasks[0].workflow_group_id = groupA.id;
+    batch.tasks[0].workflow_group_name = groupA.name;
+
+    continueBook(1, { batchId: batch.id }, { workflowGroupId: groupB.id });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(batch.tasks[0].workflow_group_id).toBe(groupA.id);
+    expect(batch.tasks[0].workflow_group_name).toBe(groupA.name);
+    expect(batch.tasks[1].workflow_group_id).toBe(groupB.id);
+    expect(batch.tasks[1].workflow_group_name).toBe(groupB.name);
+    expect(observedGroups).toEqual([groupA.id, groupB.id, groupB.id]);
   });
 
   it('supports rerunning succeeded tasks through continueBook filters', async () => {
@@ -510,19 +573,21 @@ describe('queue', () => {
   });
 
   it('pauses only unfinished book tasks in the requested scope and stops running workflow tasks', async () => {
-    const stopped: Array<{ taskId: string; workflowId?: string }> = [];
-    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId) => {
-      stopped.push({ taskId, workflowId });
+    const stopped: Array<{ taskId: string; workflowId?: string; workflowGroupId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId, workflowGroupId) => {
+      stopped.push({ taskId, workflowId, workflowGroupId });
       return {};
     });
     const batch = makeBookBatch();
     batch.status = 'running';
     batch.tasks[0].status = 'running';
+    batch.tasks[0].workflow_group_id = 'pause-group';
     batch.tasks[0].dify_task_id = 'primary-running';
     batch.tasks[0].workflow_results = [
       {
         workflow_id: 'primary',
         workflow_name: '线上工作流',
+        workflow_group_id: 'pause-group',
         status: 'running',
         dify_task_id: 'primary-running',
         result_files: []
@@ -530,6 +595,7 @@ describe('queue', () => {
       {
         workflow_id: 'compare',
         workflow_name: '对照工作流',
+        workflow_group_id: 'pause-group',
         status: 'running',
         dify_task_id: 'compare-running',
         result_files: []
@@ -540,8 +606,8 @@ describe('queue', () => {
     await pauseBookTasks(1, { batchId: batch.id, rowNoFrom: 2, rowNoTo: 3 });
 
     expect(stopped).toEqual([
-      { taskId: 'primary-running', workflowId: 'primary' },
-      { taskId: 'compare-running', workflowId: 'compare' }
+      { taskId: 'primary-running', workflowId: 'primary', workflowGroupId: 'pause-group' },
+      { taskId: 'compare-running', workflowId: 'compare', workflowGroupId: 'pause-group' }
     ]);
     expect(batch.tasks[0].stop_requested_at).toBeTruthy();
     expect(batch.tasks[1].status).toBe('paused');
@@ -550,19 +616,21 @@ describe('queue', () => {
   });
 
   it('cancels only unfinished book tasks in the requested scope while keeping finished tasks', async () => {
-    const stopped: Array<{ taskId: string; workflowId?: string }> = [];
-    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId) => {
-      stopped.push({ taskId, workflowId });
+    const stopped: Array<{ taskId: string; workflowId?: string; workflowGroupId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId, workflowGroupId) => {
+      stopped.push({ taskId, workflowId, workflowGroupId });
       return {};
     });
     const batch = makeBookBatch();
     batch.status = 'running';
     batch.tasks[0].status = 'running';
+    batch.tasks[0].workflow_group_id = 'cancel-group';
     batch.tasks[0].dify_task_id = 'primary-cancel';
     batch.tasks[0].workflow_results = [
       {
         workflow_id: 'primary',
         workflow_name: '线上工作流',
+        workflow_group_id: 'cancel-group',
         status: 'running',
         dify_task_id: 'primary-cancel',
         result_files: []
@@ -570,6 +638,7 @@ describe('queue', () => {
       {
         workflow_id: 'compare',
         workflow_name: '对照工作流',
+        workflow_group_id: 'cancel-group',
         status: 'running',
         dify_task_id: 'compare-cancel',
         result_files: []
@@ -583,8 +652,8 @@ describe('queue', () => {
     await cancelBookTasks(1, { batchId: batch.id, rowNoFrom: 2, rowNoTo: 4 });
 
     expect(stopped).toEqual([
-      { taskId: 'primary-cancel', workflowId: 'primary' },
-      { taskId: 'compare-cancel', workflowId: 'compare' }
+      { taskId: 'primary-cancel', workflowId: 'primary', workflowGroupId: 'cancel-group' },
+      { taskId: 'compare-cancel', workflowId: 'compare', workflowGroupId: 'cancel-group' }
     ]);
     expect(batch.tasks.map((task) => task.id)).toEqual([succeededTaskId]);
     expect(batch.tasks).toHaveLength(1);
@@ -624,10 +693,64 @@ describe('queue', () => {
     const batch = makeBatch();
     batch.status = 'running';
     batch.tasks[0].status = 'running';
+    batch.tasks[0].started_at = new Date().toISOString();
     batch.tasks[0].progress_label = '执行节点：HTTP 请求';
     saveBatch(batch);
 
     expect(() => continueBook(1, { batchId: batch.id })).toThrow('第 2 行');
+  });
+
+  it('pauses stale running tasks before continuing a book task list', () => {
+    const batch = makeBookBatch();
+    batch.status = 'running';
+    batch.tasks[0].status = 'running';
+    batch.tasks[0].started_at = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    batch.tasks[0].progress_label = '执行节点：HTTP 请求';
+    saveBatch(batch);
+
+    expect(() => continueBook(1, { batchId: batch.id })).not.toThrow();
+    expect(batch.tasks[0].status).toBe('paused');
+    expect(batch.tasks[0].pause_reason).toBe('stop');
+    expect(batch.tasks[0].error).toBe('任务执行超时，已自动暂停，可重试');
+  });
+
+  it('reports running and stale running counts in the queue health snapshot', () => {
+    const batch = makeBatch();
+    batch.status = 'running';
+    batch.tasks[0].status = 'running';
+    batch.tasks[0].started_at = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    batch.tasks[1].status = 'running';
+    batch.tasks[1].started_at = new Date().toISOString();
+    saveBatch(batch);
+
+    const health = getQueueHealthSnapshot();
+
+    expect(health.runningTasks).toBe(2);
+    expect(health.staleRunningTasks).toBe(1);
+    expect(health.watchdogEnabled).toBe(true);
+  });
+
+  it('watchdog pauses only stale running tasks', async () => {
+    const stopped: Array<{ taskId: string; workflowId?: string; workflowGroupId?: string }> = [];
+    __setWorkflowControlsForTest(undefined, async (taskId, _batchId, workflowId, workflowGroupId) => {
+      stopped.push({ taskId, workflowId, workflowGroupId });
+      return {};
+    });
+    const batch = makeBatch();
+    batch.status = 'running';
+    batch.tasks[0].status = 'running';
+    batch.tasks[0].started_at = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    batch.tasks[0].workflow_group_id = 'stale-group';
+    batch.tasks[0].dify_task_id = 'primary-stale';
+    batch.tasks[1].status = 'running';
+    batch.tasks[1].started_at = new Date().toISOString();
+    saveBatch(batch);
+
+    await runQueueWatchdogOnce();
+
+    expect(stopped).toEqual([{ taskId: 'primary-stale', workflowId: 'primary', workflowGroupId: 'stale-group' }]);
+    expect(batch.tasks[0].status).toBe('paused');
+    expect(batch.tasks[1].status).toBe('running');
   });
 
   it('renames books and persists the display name', () => {

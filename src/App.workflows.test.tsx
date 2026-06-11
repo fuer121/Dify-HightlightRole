@@ -30,12 +30,46 @@ describe('App workflow management page', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
   let patchBody: string | null;
-  let healthCalls: number;
+  let workflowGroupsResponse: unknown;
 
   beforeEach(() => {
     window.history.replaceState({}, '', 'http://localhost/?page=workflows');
     patchBody = null;
-    healthCalls = 0;
+    workflowGroupsResponse = {
+      groups: [
+        {
+          id: 'default',
+          name: '默认分组',
+          status: 'active',
+          is_default: true,
+          note: '默认双工作流',
+          created_at: '2026-06-10T00:00:00.000Z',
+          updated_at: '2026-06-10T00:00:00.000Z',
+          workflows: [
+            {
+              id: 'primary',
+              group_id: 'default',
+              name: '线上工作流',
+              api_key: 'app-primary-visible',
+              console_url: 'https://dify.example/primary',
+              note: '主链路',
+              created_at: '2026-06-10T00:00:00.000Z',
+              updated_at: '2026-06-10T00:00:00.000Z'
+            },
+            {
+              id: 'compare',
+              group_id: 'default',
+              name: '对照工作流',
+              api_key: 'app-compare-visible',
+              console_url: '',
+              note: '',
+              created_at: '2026-06-10T00:00:00.000Z',
+              updated_at: '2026-06-10T00:00:00.000Z'
+            }
+          ]
+        }
+      ]
+    };
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -44,36 +78,42 @@ describe('App workflow management page', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith('/api/health')) {
-          healthCalls += 1;
           return jsonResponse({
             config: {
-              difyWorkflows:
-                healthCalls > 1
-                  ? [
-                      { id: 'primary', name: '新版主工作流', configured: true, responseMode: 'streaming' },
-                      { id: 'compare', name: '对照工作流', configured: true, responseMode: 'streaming' }
-                    ]
-                  : [
-                      { id: 'primary', name: '线上工作流', configured: true, responseMode: 'streaming' },
-                      { id: 'compare', name: '对照工作流', configured: true, responseMode: 'streaming' }
-                    ]
+              difyWorkflows: [
+                { id: 'primary', name: '环境主工作流', configured: true, responseMode: 'streaming' },
+                { id: 'compare', name: '环境对照工作流', configured: true, responseMode: 'streaming' }
+              ]
             }
           });
         }
-        if (url.endsWith('/api/workflows')) {
-          return jsonResponse({
+        if (url.endsWith('/api/workflow-groups')) {
+          return jsonResponse(workflowGroupsResponse);
+        }
+        if (url.endsWith('/api/workflow-groups/default/workflows/primary')) {
+          patchBody = typeof init?.body === 'string' ? init.body : null;
+          const updatedGroup = {
+            id: 'default',
+            name: '默认分组',
+            status: 'active',
+            is_default: true,
+            note: '默认双工作流',
+            created_at: '2026-06-10T00:00:00.000Z',
+            updated_at: '2026-06-10T01:00:00.000Z',
             workflows: [
               {
                 id: 'primary',
-                name: '线上工作流',
-                api_key: 'app-primary-visible',
-                console_url: 'https://dify.example/primary',
-                note: '主链路',
+                group_id: 'default',
+                name: '新版主工作流',
+                api_key: 'app-primary-updated',
+                console_url: 'https://dify.example/new-primary',
+                note: '更新备注',
                 created_at: '2026-06-10T00:00:00.000Z',
-                updated_at: '2026-06-10T00:00:00.000Z'
+                updated_at: '2026-06-10T01:00:00.000Z'
               },
               {
                 id: 'compare',
+                group_id: 'default',
                 name: '对照工作流',
                 api_key: 'app-compare-visible',
                 console_url: '',
@@ -82,21 +122,9 @@ describe('App workflow management page', () => {
                 updated_at: '2026-06-10T00:00:00.000Z'
               }
             ]
-          });
-        }
-        if (url.endsWith('/api/workflows/primary')) {
-          patchBody = typeof init?.body === 'string' ? init.body : null;
-          return jsonResponse({
-            workflow: {
-              id: 'primary',
-              name: '新版主工作流',
-              api_key: 'app-primary-updated',
-              console_url: 'https://dify.example/new-primary',
-              note: '更新备注',
-              created_at: '2026-06-10T00:00:00.000Z',
-              updated_at: '2026-06-10T01:00:00.000Z'
-            }
-          });
+          };
+          workflowGroupsResponse = { groups: [updatedGroup] };
+          return jsonResponse({ group: updatedGroup });
         }
         return jsonResponse({});
       })
@@ -118,7 +146,8 @@ describe('App workflow management page', () => {
     await flushUi();
 
     expect(container.textContent).toContain('Workflow 管理');
-    expect(container.textContent).toContain('书籍库双工作流配置');
+    expect(container.textContent).toContain('书籍库 Workflow 分组');
+    expect(container.textContent).toContain('默认分组');
     expect(container.textContent).toContain('主工作流');
     expect((Array.from(container.querySelectorAll('input')).find((input) => input.value === 'app-primary-visible') as HTMLInputElement | undefined)?.value).toBe(
       'app-primary-visible'
@@ -133,10 +162,10 @@ describe('App workflow management page', () => {
 
     const inputs = Array.from(container.querySelectorAll('input'));
     const textareas = Array.from(container.querySelectorAll('textarea'));
-    changeInputValue(inputs[0], '新版主工作流');
-    changeInputValue(inputs[1], 'app-primary-updated');
-    changeInputValue(inputs[2], 'https://dify.example/new-primary');
-    changeInputValue(textareas[0], '更新备注');
+    changeInputValue(inputs.find((input) => input.value === '线上工作流')!, '新版主工作流');
+    changeInputValue(inputs.find((input) => input.value === 'app-primary-visible')!, 'app-primary-updated');
+    changeInputValue(inputs.find((input) => input.value === 'https://dify.example/primary')!, 'https://dify.example/new-primary');
+    changeInputValue(textareas.find((textarea) => textarea.value === '主链路')!, '更新备注');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('保存配置'))!;
     await act(async () => {
@@ -150,7 +179,7 @@ describe('App workflow management page', () => {
       console_url: 'https://dify.example/new-primary',
       note: '更新备注'
     });
-    expect(container.textContent).toContain('主工作流已保存');
+    expect(container.textContent).toContain('默认分组 / 主工作流 已保存');
     expect(container.textContent).toContain('新版主工作流 / 对照工作流');
   });
 });

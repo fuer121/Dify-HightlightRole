@@ -1,6 +1,6 @@
 # 项目总控主文档
 
-更新时间：2026-06-10
+更新时间：2026-06-11
 负责人：项目总控 Agent
 
 ## 项目总览
@@ -13,10 +13,10 @@
 
 ## 当前状态
 
-- Git 基线：`9ad35b8 Merge pull request #14 from fuer121/codex/character-continue-pending`
-- 当前分支：`codex/workflow-management`
-- 工作区状态：已新增「Workflow 管理」独立页面、`workflow_configs` SQLite 配置表与 `/api/workflows` 管理接口；书籍库双工作流调用链路后续优先读取 SQLite 中的 workflow 名称与 API key。
-- 已验证项：本轮 `npm test` 通过 14 个测试文件 103 个用例；`npm run build` 通过；`npm run lint` 通过。
+- Git 基线：`3863d4b Merge pull request #16 from fuer121/codex/feishu`
+- 当前分支：`codex/multiply-workflow`
+- 工作区状态：已把固定 `primary/compare` 双工作流升级为 Workflow 分组；已新增 `workflow_groups`、`workflow_group_configs`、`/api/workflow-groups`，并让书籍库执行任务绑定选中的 active 分组。
+- 已验证项：本轮 `npm test` 通过 15 个测试文件 120 个用例；`npm run build` 通过；`npm run lint` 通过；`curl --max-time 5 http://127.0.0.1:5175/api/health` 与 Vite 代理 `http://localhost:5173/api/health` 均快速返回。
 - PR #10 已合并功能主题：
   - 继续执行支持按筛选范围重跑已成功任务，并把真实执行 scope 写入批次日志
   - 书籍任务历史新增运行记录图片预览与双记录对比
@@ -35,15 +35,16 @@
 - 新发现风险：多角色 `角色名` 字段（如 `钟离无渊,燕沉`）可能生成双人白底立绘，即使描述里包含“单人”。这不是“抠图”证据，但属于后续需要确认的多角色输入策略。
 - 存量回填结果（2026-06-10 14:13 CST 查询）：角色形象提取历史成功立绘已沉淀到角色底图管理。当前 SQLite 有 153 条有效记录，其中 72 条 `active`、71 条 `draft`、10 条 `disabled`；章节画像 `role_asset_profiles` 当前为 0 条。若管理页继续启用/删除候选，该计数会随真实数据变化。
 - 角色底图调用边界：当前网站已提供 `/api/workflow/role-context`，但不会自动注入书籍库生图请求；只有 Dify workflow 内部节点主动 HTTP 调用该接口时，角色底图管理数据才会参与生图。若 Dify 仍使用旧「获取底图、画像」Python 节点，则继续按旧 CDN 底图路径和 role txt 逻辑执行。
-- 本轮新增目标：新增「Workflow 管理」页面，并补齐书籍库生图按当前已查询范围的总体暂停与取消能力。
+- 本轮新增目标：Workflow 管理支持多分组；书籍库执行生图时选择 active 分组并绑定到本次任务范围，后续双工作流调用、停止、详情与运行记录均按任务绑定分组展示。
+- P0 稳定性修复：`5175` 后端监听但 API 超时的根因按同步 SQLite 写放大处理；队列进度更新改为轻量保存批次元信息与变更任务。`running` 超过 10 分钟的任务视为卡死，自动暂停为可重试，不标失败、不自动重试。
 
 ## 本轮目标
 
-- 新增「Workflow 管理」入口，支持管理书籍库双工作流 `primary/compare`。
-- 新增 `workflow_configs` 持久化配置，首次从环境变量 seed，保存后以 SQLite 中的名称/API key 为准。
-- 新增 `/api/workflows` 读取与更新接口，并让 `/api/health`、书籍库 Dify 调用链路读取持久化配置。
-- 保持 Dify API Base 与 responseMode 继续由环境变量控制；页面中的“工作流地址”仅作为 Dify 控制台链接记录。
-- 新增书籍库总体「暂停生图 / 取消生图」控制：范围与当前已查询任务列表一致，暂停会立即停止当前双工作流任务，取消仅移除未完成任务并保留已生成结果。
+- 将现有固定 `primary/compare` 配置迁移为默认 Workflow 分组 `default`。
+- 新增 Workflow 分组管理：每个分组固定包含 `primary/compare` 两个槽位，支持新增、编辑、禁用，不物理删除。
+- 书籍库「执行生图」支持选择 active 分组，并把该分组写入当前已查询范围内的 runnable tasks。
+- Dify 双工作流调用、暂停/取消 stop、任务详情和运行记录按任务绑定的 `workflow_group_id/workflow_group_name` 读取和展示，避免不同分组结果混淆。
+- 保留 `/api/workflows` 默认分组兼容接口，新增 `/api/workflow-groups` 作为新管理接口。
 
 ## 任务看板
 
@@ -82,6 +83,14 @@
 | BUG-LARK-01 | 飞书导出遇到 lark-cli TLS handshake timeout | 已验证 | 排查型 Agent -> 实现型 Agent | 用户报错 `network.timeout / TLS handshake timeout`、`server/lark.ts` | `server/lark.ts`、`server/characters.test.ts`、`.env.example` | lark-cli 网络/超时类错误自动重试；权限/参数类错误不重试；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小修复提交 |
 | IMPL-WORKFLOW-MGMT-01 | 新增书籍库双 Workflow 管理页面 | 已验证 | 实现型 Agent | 现有 `DIFY_*` / `DIFY_COMPARE_*` 环境变量、书籍库双工作流执行链路 | `workflow_configs` SQLite 表、`/api/workflows`、左侧「Workflow 管理」页面、测试与文档 | 页面可编辑 primary/compare 名称、API key、Dify 控制台地址、备注；保存后后续书籍库生图使用 SQLite 中的名称/API key；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
 | IMPL-BOOK-GEN-CONTROL-01 | 书籍库生图新增总体暂停与取消 | 已验证 | 实现型 Agent | 当前书籍库 `continueBook` 范围语义、双工作流 stop 逻辑、用户确认的暂停/取消语义 | `server/queue.ts`、`server/index.ts`、`src/App.tsx`、相关测试与文档 | 暂停/取消均按当前已查询范围执行；暂停会停止 running 双工作流并暂停 queued；取消移除 queued/running/paused 且保留 succeeded/failed；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| IMPL-WORKFLOW-GROUP-01 | Workflow 管理升级为分组并支持书籍库执行绑定 | 已验证 | 实现型 Agent | `IMPL-WORKFLOW-MGMT-01`、书籍库双工作流执行链路、暂停/取消 stop 逻辑 | `workflow_groups`、`workflow_group_configs`、`/api/workflow-groups`、书籍库分组选择、任务/run/result 分组字段、测试与文档 | 默认分组从旧配置/环境变量 seed；新分组可新增/编辑/禁用；书籍库执行绑定 active 分组；Dify 调用与 stop 按任务绑定分组；详情/运行记录展示分组；全量 `npm test && npm run build && npm run lint` 通过 | 是 | 当前分支独立提交 |
+| IMPL-WORKFLOW-RESULT-COLUMNS | 书籍库列表与飞书导出保留双 Workflow 生图结果 | 已验证 | 实现型 Agent | 书籍库任务 `workflow_results` 已保存 primary/compare 输出 | `src/App.tsx`、`src/styles.css`、`server/lark.ts`、相关测试 | 任务列表新增两个 workflow 结果列，列名取 workflow 名称并用 hover 保留完整名；飞书导出按实际 workflow 名称创建附件字段并上传对应图片；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小功能 |
+| BUG-LARK-SCOPE-01 | 书籍库飞书导出误导出整批任务清单 | 已验证 | 排查型 Agent -> 实现型 Agent | 用户反馈导出结果不像当前筛选表格内容 | `src/App.tsx`、`server/index.ts`、`src/App.books-scope.test.tsx` | 书籍库页导出飞书带上当前已查询筛选条件和 `bookId`；后端有 `bookId` 时按同一套任务列表过滤导出，筛选导出不复用整批 `batch.export` 缓存；`npm test && npm run build && npm run lint` 通过 | 是 | 当前分支小修复 |
+| BUG-WORKFLOW-BINDING-01 | Workflow 分组执行时覆盖其他任务绑定 | 已验证 | 排查型 Agent -> 实现型 Agent | 用户反馈一个任务选择分组后会强制传递给其他任务 | `server/queue.ts`、`src/App.tsx`、相关测试 | `continueBook` 仅给未绑定任务填入当前默认分组，已绑定任务保留自己的 `workflow_group_id/name`；页面文案改为“默认 Workflow 分组”；`npm test -- server/queue.test.ts`、`npm test -- src/App.books-scope.test.tsx` 通过 | 是 | 当前分支小修复 |
+| BUG-BOOK-RUNNING-SCOPE-01 | 执行一本书时影响另一本书的执行中状态展示 | 已验证 | 排查型 Agent -> 实现型 Agent | 用户反馈同一上传任务清单下不同书籍状态隔离不干净 | `src/App.tsx`、`src/App.books-scope.test.tsx`、`server/queue.test.ts` | 书籍库页面执行中判断改为当前书籍维度 `running_count` 或当前列表 running task，不再使用全局 batch.status；队列层补测确认执行 book=1 不会改变 book=2 任务状态；相关测试通过 | 是 | 当前分支小修复 |
+| BUG-P0-SERVICE-01 | 修复 5175 API 无响应与 running 任务卡死 | 已验证 | 排查型 Agent -> 实现型 Agent | `5175` 监听但 `/api/health` 超时、SQLite 同步写放大采样、长期 running 任务 | `server/queue.ts`、`server/store.ts`、`server/index.ts`、`.env.example`、相关测试与文档 | 队列 emit 不再全量保存整批任务；hydrate 不再全量写回；health 不读 workflow DB 配置并返回队列快照；running 超过 10 分钟自动暂停可重试；`npm test && npm run build && npm run lint` 通过；本机 health 与 Vite 代理均快速返回 | 是 | 当前分支 P0 稳定性提交 |
+| P1-1 | Workflow 名称展示与真实配置一致 | 已验证 | 实现型 Agent | `/api/health` 已轻量化、`/api/workflow-groups` 为真实配置源 | `src/App.tsx`、`src/App.workflows.test.tsx` | 侧栏 Dify 工作流名称优先读取默认 active Workflow 分组；管理页修改默认分组 workflow 名称后侧栏同步；health 不重新读取 workflow DB；目标测试通过 | 是 | 当前分支 P1 小修复 |
+| P1-4 | 书籍任务表列宽防 NaN 与旧缓存兼容 | 已验证 | 实现型 Agent | 书籍库任务列表新增 workflow 结果列后存在旧 localStorage 缓存 | `src/App.tsx`、`src/App.books-scope.test.tsx` | 列宽读取、保存、最小宽度计算、`col` 渲染和拖拽起点统一走安全 getter；非法旧缓存不会向 React style 写入 `NaN`；目标测试通过 | 是 | 当前分支 P1 小修复 |
 
 ## 线程索引
 
@@ -208,15 +217,34 @@
 16. 角色底图导出按钮在导出中展示当前导出条数，并提示“创建飞书 Base 并上传附件期间需保持服务运行”，避免长导出被误判为无响应。
 17. 书籍库执行中轮询刷新任务列表时，不再复用“查询”按钮的 loading 状态；查询按钮只反映用户手动查询/分页/切换范围触发的任务加载，不与任务执行状态绑定。
 
+### 2026-06-11
+
+1. Workflow 管理从固定 `primary/compare` 升级为分组模型；默认分组 ID 固定为 `default`，首次启动时从旧 `workflow_configs` 或环境变量 seed 主/对照配置。
+2. 分组 ID 创建后不可修改；如需变更 ID，应新建分组并禁用旧分组，避免历史任务引用失效。
+3. 禁用分组只阻止新的书籍库执行绑定，不影响历史任务、历史 run 和已绑定 queued/running 任务读取该分组配置。
+4. 书籍库执行生图的范围仍以当前已点击“查询”后的任务列表为准；`workflowGroupId` 只通过 POST body 表达分组绑定，不改变 query 中的筛选 scope 语义。
+5. `tasks`、`task_runs` 和 `workflow_results_json` 均保存 `workflow_group_id/workflow_group_name`；右侧详情和执行记录以这些快照字段展示，后续 Workflow 管理页改名不会改写历史结果含义。
+6. 暂停/取消 running 任务时，优先从任务的 `workflow_results` 读取每个 Dify task 所属 `workflow_group_id + workflow_id`，避免使用当前默认分组误停其他 API key 下的任务。
+7. 书籍库任务列表和飞书导出都以 `workflow_results.workflow_name` 作为双工作流结果的展示/导出字段名；列表列头使用缩略名并通过 hover 展示完整名，飞书导出继续保留旧 `结果图片` 聚合字段，同时新增两个 workflow 命名附件字段。
+8. 书籍库页「导出飞书」范围固定为当前已点击“查询”后生效的任务列表范围，与“执行生图/暂停/取消”一致；筛选导出每次新建 Base，不复用整批任务清单的 `batch.export` 缓存。
+9. 书籍库页的 Workflow 下拉定义为“未绑定任务的默认 Workflow 分组”；任务一旦已有 `workflow_group_id/name`，后续同范围执行必须保留该任务绑定，允许不同任务在同一队列中按不同分组同步执行。
+10. 书籍库页的“当前任务清单正在执行”状态按当前书籍隔离；同一上传任务清单中其他书籍有 running 任务时，不应让当前书籍页进入执行中提示或禁用执行入口。
+11. P0 后端稳定性策略固定为：单条书籍库生图任务 `running` 超过 `TASK_RUNNING_TIMEOUT_MS`，默认 600000ms，视为卡死并自动置为 `paused` 可重试；不标记 `failed`，不自动重试，避免重复调用 Dify。
+12. 队列健康检查必须轻量化：`/api/health` 不再读取 SQLite workflow 分组/配置表，只返回环境变量级 Dify 配置摘要和内存队列快照，保证 DB 写压力下仍可用于判断进程存活。
+13. 队列进度持久化边界改为只保存批次元信息、事件和变更任务；只有创建/导入等结构性操作继续使用整批 `saveBatch`，避免每次进度事件遍历数千条任务。
+14. 服务启动恢复继续把 DB 中遗留 `running` 任务改为 `paused`；运行期新增 watchdog 每 60 秒扫描一次 stale running，尽力停止 Dify task 后暂停任务。
+15. 侧边栏“Dify 工作流”展示不再依赖 `/api/health` 的环境变量摘要；真实展示源改为 `/api/workflow-groups` 的默认 active 分组，只有分组接口不可用或缺少 workflow 名称时才回退 health。
+16. 书籍库任务表列宽必须对旧缓存和异常运行态做兜底；所有列宽读取、持久化、最小宽度计算、`col` 渲染和拖拽起点统一走安全 getter，禁止把 `NaN` 写入 React style。
+
 ## Git 记录
 
-- HEAD：`66d4133 Merge pull request #15 from fuer121/codex/workflow-management`
-- 主线基线：`origin/main` 已到 `66d4133 Merge pull request #15 from fuer121/codex/workflow-management`
-- 当前分支：`codex/feishu`
+- HEAD：`3863d4b Merge pull request #16 from fuer121/codex/feishu`
+- 主线基线：`origin/main` 已到 `3863d4b Merge pull request #16 from fuer121/codex/feishu`
+- 当前分支：`codex/multiply-workflow`
 - 推送状态：未推送
 - PR：未创建
 - 本轮功能提交：待定
-- 本轮提交范围：角色底图管理导出飞书稳定性修复、书籍库查询按钮与执行轮询解耦、附件上传并发配置、前端导出反馈、测试与文档同步。
+- 本轮提交范围：Workflow 分组数据模型、管理接口、书籍库执行分组绑定、任务/run/result 分组展示、暂停/取消按绑定分组 stop、书籍库列表/飞书导出双 workflow 结果列、书籍库飞书导出按当前筛选范围导出、任务级 workflow 分组绑定保留、跨书籍执行中状态隔离修复、5175 API 响应恢复、running 卡死任务 watchdog、侧栏 workflow 名称读取真实分组配置、书籍任务表列宽安全兜底、测试与文档同步。
 - 未纳入 Git 的本地产物：`.playwright-cli/`、`测试文本/`。
 
 ## 风险与阻塞清单
@@ -238,6 +266,8 @@
 | R-13 | 角色队列连续出现 Dify HTTP 层 `fetch failed` | 中 | 若直接继续执行，会把剩余 queued 行快速打成失败 | 已增加限速/自动重试/小样本上限；真实样本 555-557 成功，建议继续按小批次推进 |
 | R-14 | 角色任务存在历史失败 run 缺少 raw outputs | 中 | 老失败记录只能看到“未返回立绘图片”，无法回溯 workflow 输出 | 新代码已保存失败诊断字段；旧 run 不回填 |
 | R-15 | 角色立绘远端签名 URL 会过期 | 中 | 成功任务稍后回看可能显示“图片暂不可读” | 新结果会尽量立即缓存到本地；已从历史 `markdown_output` base64 回填可修复的成功行。若远端 URL 已过期且历史 raw 中无 base64，则无法无损回填，只能重跑该行 |
+| R-16 | Workflow 分组配置在任务排队后仍可能被管理页编辑 | 中 | 已绑定 queued 任务启动时会读取该分组最新 API key/名称；若运营在执行中改 key，后续行可能使用新配置 | 本期只快照 group id/name 与 result workflow name，不快照 API key；执行大批量前应冻结分组配置，后续如需强隔离再引入 run 级配置快照 |
+| R-17 | 禁用分组不影响历史任务执行 | 低 | 如果用户禁用分组后仍有已绑定 queued 任务，它们继续可执行，可能与“禁用”直觉不同 | 已记录为产品边界：禁用只阻止新绑定，不破坏历史引用和停任务能力 |
 | R-16 | 本地 DSL 修改不会自动更新 Dify 平台 workflow | 中 | 只改仓库文件时，平台系统 Prompt 仍可能沿用旧“提取人物”语义 | 前端和当前 job Prompt 已可生效；平台侧如需彻底一致，需要重新导入 DSL 或手动同步 Dify 节点 |
 | R-17 | 取消默认小样本上限后，大批量执行会长时间占用队列并持续调用 Dify | 中 | 极大批量任务如果筛选范围过大，会持续运行直到完成或手动暂停 | 默认按用户选择范围执行；页面已有暂停整体任务入口；如需跑完所有未生成行，必须显式点击“继续全部未生成”，并先确认 Prompt 与 45 秒限速 |
 | R-18 | 当前运行 job 的 `promptText` 是 `测试 prompt` | 中 | 继续跑完 700 条会把测试文本叠加进部分描述，可能影响一致性 | 已记录事实；是否暂停并保存正式 Prompt 属于 Prompt 策略变化，需用户确认后再执行 |
@@ -250,6 +280,9 @@
 | R-25 | 飞书 OpenAPI 或本机网络偶发 TLS handshake timeout | 中 | 导出到飞书多维表格时可能中断在表字段、记录写入或附件上传阶段 | 已对 lark-cli 网络类错误增加可配置重试；若持续失败，需检查代理/网络或升级 lark-cli |
 | R-26 | 角色底图全量导出附件较多，导出期间服务重启会中断 HTTP 请求 | 中 | 已创建的飞书 Base 可能存在，但前端会显示导出失败 | 已把附件上传改为默认 4 并发并增强前端导出中提示；导出期间仍需避免重启服务 |
 | R-27 | 书籍库执行中后台轮询可能被误认为用户点击了“查询” | 低 | 用户会误判查询按钮和任务执行状态存在绑定 | 已拆分后台刷新与手动查询 loading；轮询继续更新列表，但不禁用/转动查询按钮 |
+| R-28 | 同一上传任务清单跨书籍并发执行仍受 batch 级队列模型约束 | 中 | 页面状态已按书籍隔离，但若同一个 batch 内另一本书正在真实 running，后端仍以 batch 级队列保护避免同批次并发竞态 | 当前修复范围限定为状态展示与任务状态不污染；如需同 batch 多书并发执行，需要后续引入书籍级队列锁 |
+| R-29 | DB 同步写压力导致 Node event loop 饥饿 | 高 | 会表现为端口监听但 API 不响应，Vite 代理超时或 ECONNRESET | 已把队列 emit 从全量保存整批任务改为轻量保存变更任务；health 已通过本机与 Vite 代理验证 |
+| R-30 | 长期 running 任务阻塞后续执行 | 高 | 会让任务清单长期显示执行中，且用户无法继续当前范围 | 已新增 10 分钟 stale running 自动暂停和 60 秒 watchdog；自动暂停不失败、不自动重试，需用户显式继续或重试 |
 
 ## QA-01 验收脚本
 

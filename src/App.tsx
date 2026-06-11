@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -39,7 +39,7 @@ type ValueStatusFilter = 'all' | 'valuable' | 'not_valuable' | 'unknown';
 type RangeFilterMode = 'chapter' | 'row';
 type TaskPageSize = 20 | 50 | 200;
 type QualityPageSize = 20 | 50 | 100;
-type BookTaskColumnKey = 'status' | 'image' | 'source' | 'is_valid' | 'paragraph' | 'result' | 'actions';
+type BookTaskColumnKey = 'status' | 'image' | 'workflow_primary' | 'workflow_compare' | 'source' | 'is_valid' | 'paragraph' | 'result' | 'actions';
 type BookTaskColumnWidths = Record<BookTaskColumnKey, number>;
 type ImageValue = '有价值' | '无价值';
 type QualityRunStatus = 'idle' | 'running' | 'completed' | 'failed';
@@ -80,6 +80,8 @@ interface ResultFile {
 }
 
 interface WorkflowResult {
+  workflow_group_id?: string;
+  workflow_group_name?: string;
   workflow_id: string;
   workflow_name: string;
   status: 'running' | 'succeeded' | 'failed';
@@ -100,6 +102,8 @@ interface BatchTask {
   id: string;
   batch_id?: string;
   source_kind?: string;
+  workflow_group_id?: string;
+  workflow_group_name?: string;
   row_no: number;
   input: {
     book_id: number;
@@ -164,6 +168,8 @@ interface TaskRunRecord {
   task_id: string;
   attempt_no: number;
   status: TaskStatus;
+  workflow_group_id?: string;
+  workflow_group_name?: string;
   started_at?: string;
   finished_at?: string;
   elapsed_seconds?: number;
@@ -195,7 +201,25 @@ interface AppHealthConfig {
       configured: boolean;
       responseMode: string;
     }>;
+    workflowGroups?: Array<{
+      id: string;
+      name: string;
+      status: 'active' | 'disabled';
+      isDefault: boolean;
+    }>;
   };
+}
+
+interface WorkflowGroupSummary {
+  id: string;
+  name: string;
+  status: 'active' | 'disabled';
+  is_default?: boolean;
+  isDefault?: boolean;
+  workflows?: Array<{
+    id: string;
+    name?: string | null;
+  }>;
 }
 
 interface BatchEvent {
@@ -415,6 +439,8 @@ const MAX_BOOK_DETAIL_PANEL_WIDTH = 720;
 const BOOK_TASK_COLUMN_CONFIG: Array<{ key: BookTaskColumnKey; label: string; defaultWidth: number; minWidth: number; maxWidth: number }> = [
   { key: 'status', label: '状态', defaultWidth: 116, minWidth: 92, maxWidth: 180 },
   { key: 'image', label: '图片', defaultWidth: 92, minWidth: 70, maxWidth: 150 },
+  { key: 'workflow_primary', label: '主工作流', defaultWidth: 118, minWidth: 88, maxWidth: 220 },
+  { key: 'workflow_compare', label: '对照工作流', defaultWidth: 118, minWidth: 88, maxWidth: 220 },
   { key: 'source', label: '来源', defaultWidth: 150, minWidth: 112, maxWidth: 240 },
   { key: 'is_valid', label: 'is_valid', defaultWidth: 96, minWidth: 80, maxWidth: 160 },
   { key: 'paragraph', label: '段落内容', defaultWidth: 300, minWidth: 180, maxWidth: 760 },
@@ -545,20 +571,28 @@ function clampColumnWidth(columnKey: BookTaskColumnKey, width: number) {
   return Math.round(Math.min(maxWidth, Math.max(minWidth, width)));
 }
 
+function getBookTaskColumnWidth(widths: Partial<BookTaskColumnWidths>, columnKey: BookTaskColumnKey) {
+  const config = BOOK_TASK_COLUMN_CONFIG.find((column) => column.key === columnKey);
+  const value = widths[columnKey];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? clampColumnWidth(columnKey, value)
+    : (config?.defaultWidth ?? 120);
+}
+
+function normalizeBookTaskColumnWidths(widths: Partial<BookTaskColumnWidths>) {
+  return BOOK_TASK_COLUMN_CONFIG.reduce((nextWidths, column) => {
+    nextWidths[column.key] = getBookTaskColumnWidth(widths, column.key);
+    return nextWidths;
+  }, {} as BookTaskColumnWidths);
+}
+
 function loadBookTaskColumnWidths(): BookTaskColumnWidths {
   if (typeof window === 'undefined') return { ...DEFAULT_BOOK_TASK_COLUMN_WIDTHS };
   try {
     const raw = window.localStorage.getItem(BOOK_TASK_TABLE_WIDTHS_KEY);
     if (!raw) return { ...DEFAULT_BOOK_TASK_COLUMN_WIDTHS };
     const parsed = JSON.parse(raw) as Partial<Record<BookTaskColumnKey, unknown>>;
-    return BOOK_TASK_COLUMN_CONFIG.reduce((widths, column) => {
-      const value = parsed[column.key];
-      widths[column.key] =
-        typeof value === 'number' && Number.isFinite(value)
-          ? clampColumnWidth(column.key, value)
-          : column.defaultWidth;
-      return widths;
-    }, {} as BookTaskColumnWidths);
+    return normalizeBookTaskColumnWidths(parsed as Partial<BookTaskColumnWidths>);
   } catch {
     return { ...DEFAULT_BOOK_TASK_COLUMN_WIDTHS };
   }
@@ -566,7 +600,7 @@ function loadBookTaskColumnWidths(): BookTaskColumnWidths {
 
 function saveBookTaskColumnWidths(widths: BookTaskColumnWidths) {
   try {
-    window.localStorage?.setItem(BOOK_TASK_TABLE_WIDTHS_KEY, JSON.stringify(widths));
+    window.localStorage?.setItem(BOOK_TASK_TABLE_WIDTHS_KEY, JSON.stringify(normalizeBookTaskColumnWidths(widths)));
   } catch {
     // Some embedded browser contexts can block localStorage; resizing should still work for the current session.
   }
@@ -646,6 +680,26 @@ function describeTaskQueryScope(queryState: TaskQueryState) {
   return fragments.length === 0 ? '当前任务清单全部任务' : fragments.join(' / ');
 }
 
+function workflowNameFromHealth(payload: AppHealthConfig) {
+  if (payload.config?.difyWorkflows?.length) {
+    return payload.config.difyWorkflows.map((workflow) => workflow.name).join(' / ');
+  }
+  return payload.config?.difyWorkflowName?.trim() || null;
+}
+
+function workflowNameFromGroups(groups: WorkflowGroupSummary[]) {
+  const group =
+    groups.find((item) => item.status === 'active' && (item.is_default || item.isDefault || item.id === 'default')) ??
+    groups.find((item) => item.status === 'active') ??
+    groups.find((item) => item.is_default || item.isDefault || item.id === 'default') ??
+    groups[0];
+  const names =
+    group?.workflows
+      ?.map((workflow) => workflow.name?.trim())
+      .filter((name): name is string => Boolean(name)) ?? [];
+  return names.length > 0 ? names.join(' / ') : null;
+}
+
 export function App() {
   const initialPageParam = new URLSearchParams(window.location.search).get('page');
   const initialPage: AppPage =
@@ -662,26 +716,37 @@ export function App() {
   const [difyWorkflowName, setDifyWorkflowName] = useState('LL-段落高光生图-效果测试');
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  function refreshDifyWorkflowName() {
+  const refreshDifyWorkflowNameFromHealth = useCallback(() => {
     return fetch('/api/health')
       .then((response) => readJson<AppHealthConfig>(response))
       .then((payload) => {
-        if (payload.config?.difyWorkflows?.length) {
-          setDifyWorkflowName(payload.config.difyWorkflows.map((workflow) => workflow.name).join(' / '));
-          return;
-        }
-        if (payload.config?.difyWorkflowName) {
-          setDifyWorkflowName(payload.config.difyWorkflowName);
+        const name = workflowNameFromHealth(payload);
+        if (name) {
+          setDifyWorkflowName(name);
         }
       })
       .catch(() => {
         setDifyWorkflowName('LL-段落高光生图-效果测试');
       });
-  }
+  }, []);
+
+  const refreshDifyWorkflowName = useCallback(() => {
+    return fetch('/api/workflow-groups')
+      .then((response) => readJson<{ groups?: WorkflowGroupSummary[] }>(response))
+      .then((payload) => {
+        const name = workflowNameFromGroups(payload.groups ?? []);
+        if (name) {
+          setDifyWorkflowName(name);
+          return;
+        }
+        return refreshDifyWorkflowNameFromHealth();
+      })
+      .catch(() => refreshDifyWorkflowNameFromHealth());
+  }, [refreshDifyWorkflowNameFromHealth]);
 
   useEffect(() => {
     void refreshDifyWorkflowName();
-  }, []);
+  }, [refreshDifyWorkflowName]);
 
   function updatePage(nextPage: AppPage) {
     setPage(nextPage);
@@ -1631,12 +1696,6 @@ export function BatchWorkflowPage() {
                 ) : (
                   <ImagePlaceholder task={selectedTask} />
                 )}
-                {selectedTask.paragraph_description && (
-                  <div className="description-output">
-                    <strong>生成段落描述</strong>
-                    <p>{selectedTask.paragraph_description}</p>
-                  </div>
-                )}
                 {selectedTask.result_text && <pre className="text-output">{selectedTask.result_text}</pre>}
                 {selectedTask.error && (
                   <div className="task-error">
@@ -1752,6 +1811,8 @@ function workflowResultsForItem(item: BatchTask | TaskRunRecord): WorkflowResult
   if (!hasLegacyOutput) return [];
   return [
     {
+      workflow_group_id: item.workflow_group_id ?? 'default',
+      workflow_group_name: item.workflow_group_name ?? '默认分组',
       workflow_id: 'primary',
       workflow_name: '主工作流',
       status: item.status === 'failed' ? 'failed' : 'succeeded',
@@ -1765,6 +1826,32 @@ function workflowResultsForItem(item: BatchTask | TaskRunRecord): WorkflowResult
       error: item.error
     }
   ];
+}
+
+function workflowGroupLabel(result: WorkflowResult) {
+  if (!result.workflow_group_id && !result.workflow_group_name) return undefined;
+  const name = result.workflow_group_name ?? '默认分组';
+  const id = result.workflow_group_id ?? 'default';
+  return `${name} / ${id}`;
+}
+
+const WORKFLOW_RESULT_COLUMNS: Array<{ key: Extract<BookTaskColumnKey, 'workflow_primary' | 'workflow_compare'>; workflowId: string; fallbackName: string }> = [
+  { key: 'workflow_primary', workflowId: 'primary', fallbackName: '主工作流' },
+  { key: 'workflow_compare', workflowId: 'compare', fallbackName: '对照工作流' }
+];
+
+function workflowResultForTask(task: BatchTask, workflowId: string) {
+  return workflowResultsForItem(task).find((result) => result.workflow_id === workflowId);
+}
+
+function workflowColumnName(tasks: BatchTask[], workflowId: string, fallbackName: string) {
+  return tasks
+    .flatMap((task) => workflowResultsForItem(task))
+    .find((result) => result.workflow_id === workflowId)?.workflow_name ?? fallbackName;
+}
+
+function shortWorkflowName(name: string) {
+  return name.length > 8 ? `${name.slice(0, 8)}...` : name;
 }
 
 function workflowOutputString(result: WorkflowResult, key: string) {
@@ -1824,11 +1911,12 @@ function WorkflowResultCards({
   return (
     <div className="workflow-result-grid">
       {results.map((result) => (
-        <section className={`workflow-result-card ${result.status}`} key={result.workflow_id}>
+        <section className={`workflow-result-card ${result.status}`} key={`${result.workflow_group_id ?? 'default'}:${result.workflow_id}`}>
           <header>
             <div>
               <strong>{result.workflow_name}</strong>
               <span>{result.status === 'succeeded' ? '已生成' : result.status === 'running' ? '生成中' : '失败'}</span>
+              {workflowGroupLabel(result) && <small>{workflowGroupLabel(result)}</small>}
             </div>
             {result.elapsed_seconds !== undefined ? <small>{result.elapsed_seconds}s</small> : null}
           </header>
@@ -1851,7 +1939,12 @@ function WorkflowResultCards({
             <span>角色：{workflowOutputRoles(result).join('、') || '-'}</span>
             <span>耗时：{result.elapsed_seconds !== undefined ? `${result.elapsed_seconds}s` : '-'}</span>
           </div>
-          {workflowResultDescription(result) && <p>{workflowResultDescription(result)}</p>}
+          {workflowResultDescription(result) && (
+            <div className="description-output workflow-description-output">
+              <strong>生图描述</strong>
+              <p>{workflowResultDescription(result)}</p>
+            </div>
+          )}
           {result.error && (
             <div className="task-error">
               <AlertCircle size={16} />
@@ -1872,8 +1965,9 @@ function WorkflowRunSummary({ run, onPreview }: { run: TaskRunRecord; onPreview:
   return (
     <div className="workflow-run-summary">
       {results.map((result) => (
-        <div className={`workflow-run-chip ${result.status}`} key={result.workflow_id}>
+        <div className={`workflow-run-chip ${result.status}`} key={`${result.workflow_group_id ?? 'default'}:${result.workflow_id}`}>
           <span>{result.workflow_name}</span>
+          {workflowGroupLabel(result) && <small>{workflowGroupLabel(result)}</small>}
           {result.result_files[0] ? (
             <button className="run-thumb-button" onClick={() => onPreview(result.result_files[0])}>
               <img src={absolutePreviewUrl(result.result_files[0].previewUrl)} alt={result.result_files[0].name} />
@@ -1942,6 +2036,36 @@ function valueStatusLabel(value: ValueStatusFilter) {
   return value === 'valuable' ? '有价值' : value === 'not_valuable' ? '无价值' : value === 'unknown' ? '未知' : '全部价值';
 }
 
+function WorkflowTaskResultCell({
+  result,
+  onPreview
+}: {
+  result?: WorkflowResult;
+  onPreview: (file: ResultFile) => void;
+}) {
+  const file = result?.result_files[0];
+  if (file) {
+    return (
+      <button
+        className="thumb-button workflow-task-thumb"
+        onClick={(event) => {
+          event.stopPropagation();
+          onPreview(file);
+        }}
+        title={`${result?.workflow_name ?? '工作流'}：查看大图`}
+      >
+        <img src={absolutePreviewUrl(file.previewUrl)} alt={file.name} />
+      </button>
+    );
+  }
+
+  if (result) {
+    return <span className={`workflow-task-empty ${result.status}`}>{result.status === 'running' ? '生成中' : result.status === 'failed' ? '失败' : '无图'}</span>;
+  }
+
+  return <span className="thumb-empty">-</span>;
+}
+
 function TaskActions({ task, onAction }: { task: BatchTask; onAction: (action: 'pause' | 'retry' | 'delete') => void }) {
   const validationFailed = task.error?.startsWith('字段校验失败') ?? false;
   const canPause = task.status === 'queued' || task.status === 'running';
@@ -1970,16 +2094,22 @@ function TaskActions({ task, onAction }: { task: BatchTask; onAction: (action: '
 
 function ResizableTableHeader({
   column,
+  label,
+  fullLabel,
   onResizeStart
 }: {
   column: (typeof BOOK_TASK_COLUMN_CONFIG)[number];
+  label?: string;
+  fullLabel?: string;
   onResizeStart: (columnKey: BookTaskColumnKey, clientX: number, target: HTMLButtonElement, pointerId?: number) => void;
 }) {
+  const displayLabel = label ?? column.label;
+  const title = fullLabel ?? displayLabel;
   return (
-    <th className="resizable-th" scope="col">
-      <span>{column.label}</span>
+    <th className="resizable-th" scope="col" title={title}>
+      <span>{displayLabel}</span>
       <button
-        aria-label={`调整${column.label}列宽`}
+        aria-label={`调整${displayLabel}列宽`}
         className="column-resizer"
         title="拖动调整列宽"
         onClick={(event) => event.stopPropagation()}
@@ -2015,6 +2145,8 @@ function BooksManagementPage({
   const [selectedBookId, setSelectedBookId] = useState<number | null>(null);
   const [batches, setBatches] = useState<BookBatchSummary[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState('all');
+  const [workflowGroups, setWorkflowGroups] = useState<WorkflowGroupSummary[]>([]);
+  const [selectedWorkflowGroupId, setSelectedWorkflowGroupId] = useState('default');
   const [tasks, setTasks] = useState<BatchTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [runs, setRuns] = useState<TaskRunRecord[]>([]);
@@ -2048,6 +2180,7 @@ function BooksManagementPage({
   const [lightboxFile, setLightboxFile] = useState<ResultFile | null>(null);
   const [isUploading, setUploading] = useState(false);
   const [isExporting, setExporting] = useState(false);
+  const [bookExportResult, setBookExportResult] = useState<{ batchId: string; result: LarkExportResult } | null>(null);
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [editingBatchName, setEditingBatchName] = useState('');
@@ -2072,9 +2205,14 @@ function BooksManagementPage({
     [compareRunIds, runs]
   );
   const selectedBatch = useMemo(() => batches.find((batch) => batch.id === selectedBatchId), [batches, selectedBatchId]);
+  const visibleBookExportResult = bookExportResult?.batchId === selectedBatchId ? bookExportResult.result : null;
+  const selectedWorkflowGroup = useMemo(
+    () => workflowGroups.find((group) => group.id === selectedWorkflowGroupId) ?? workflowGroups.find((group) => group.id === 'default') ?? workflowGroups[0],
+    [selectedWorkflowGroupId, workflowGroups]
+  );
   const isAllTaskListView = selectedBatchId === 'all';
   const runningTask = useMemo(() => tasks.find((task) => task.status === 'running'), [tasks]);
-  const selectedBatchIsRunning = selectedBatch?.status === 'running' || Boolean(runningTask);
+  const selectedBatchIsRunning = Boolean(runningTask) || Number(selectedBatch?.running_count ?? 0) > 0;
   const rangeFilterSummary = useMemo(() => {
     if (rangeFilterMode === 'chapter') {
       if (!chapterFrom.trim() && !chapterTo.trim()) return '按章节';
@@ -2085,8 +2223,16 @@ function BooksManagementPage({
   }, [chapterFrom, chapterTo, rangeFilterMode, rowNoFrom, rowNoTo]);
   const continueScopeText = useMemo(() => describeTaskQueryScope(appliedTaskQueryState), [appliedTaskQueryState]);
   const taskTableMinWidth = useMemo(
-    () => BOOK_TASK_COLUMN_CONFIG.reduce((total, column) => total + taskColumnWidths[column.key], 0),
+    () => BOOK_TASK_COLUMN_CONFIG.reduce((total, column) => total + getBookTaskColumnWidth(taskColumnWidths, column.key), 0),
     [taskColumnWidths]
+  );
+  const workflowTaskColumnNames = useMemo(
+    () =>
+      WORKFLOW_RESULT_COLUMNS.reduce((names, column) => {
+        names[column.key] = workflowColumnName(tasks, column.workflowId, column.fallbackName);
+        return names;
+      }, {} as Record<Extract<BookTaskColumnKey, 'workflow_primary' | 'workflow_compare'>, string>),
+    [tasks]
   );
   const bookMainGridStyle = useMemo(
     () => ({
@@ -2187,6 +2333,20 @@ function BooksManagementPage({
     }
   }
 
+  async function loadWorkflowGroups() {
+    try {
+      const payload = await fetch('/api/workflow-groups').then((response) => readJson<{ groups: WorkflowGroupSummary[] }>(response));
+      const activeGroups = payload.groups.filter((group) => group.status === 'active');
+      setWorkflowGroups(activeGroups);
+      setSelectedWorkflowGroupId((current) => {
+        if (activeGroups.some((group) => group.id === current)) return current;
+        return activeGroups.find((group) => group.id === 'default')?.id ?? activeGroups[0]?.id ?? 'default';
+      });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '加载 Workflow 分组失败');
+    }
+  }
+
   async function loadBookBatches(bookId = selectedBook?.book_id, preferredTaskListId?: string) {
     if (!bookId) {
       setBatches([]);
@@ -2257,6 +2417,7 @@ function BooksManagementPage({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadBooks();
+      void loadWorkflowGroups();
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -2437,7 +2598,11 @@ function BooksManagementPage({
       params.delete('page');
       params.delete('pageSize');
       const query = params.toString();
-      const batch = await fetch(`/api/books/${selectedBook.book_id}/continue${query ? `?${query}` : ''}`, { method: 'POST' }).then((response) => readJson<Batch>(response));
+      const batch = await fetch(`/api/books/${selectedBook.book_id}/continue${query ? `?${query}` : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflowGroupId: selectedWorkflowGroup?.id ?? 'default' })
+      }).then((response) => readJson<Batch>(response));
       const nextPageSize = taskListPageSize(batch.tasks.filter((task) => task.input.book_id === selectedBook.book_id).length);
       const nextQueryState = taskQueryStateForScope(selectedBook.book_id, batch.id);
       setSelectedBatchId(batch.id);
@@ -2521,13 +2686,31 @@ function BooksManagementPage({
   }
 
   async function exportSelectedBatchToLark() {
-    if (!selectedBatch) return;
+    if (!selectedBatch || !selectedBook) return;
     setError(null);
     setExporting(true);
+    const params = createTaskQueryParams(appliedTaskQueryState, 1, taskPageSize, selectedBatch.id);
+    params.delete('page');
+    params.delete('pageSize');
+    params.set('bookId', String(selectedBook.book_id));
+    const query = params.toString();
     try {
-      await fetch(`/api/batches/${selectedBatch.id}/export/lark`, { method: 'POST' }).then((response) => readJson<LarkExportResult>(response));
+      const result = await fetch(`/api/batches/${selectedBatch.id}/export/lark${query ? `?${query}` : ''}`, { method: 'POST' }).then((response) => readJson<LarkExportResult>(response));
+      setBookExportResult({ batchId: selectedBatch.id, result });
       await loadBookBatches(selectedBook?.book_id);
     } catch (exportError) {
+      if (isNetworkFetchError(exportError)) {
+        const refreshedBatch = await fetch(`/api/batches/${selectedBatch.id}`)
+          .then((response) => readJson<Batch>(response))
+          .catch(() => undefined);
+        if (refreshedBatch?.export) {
+          setBookExportResult({ batchId: selectedBatch.id, result: refreshedBatch.export });
+          setError(null);
+          return;
+        }
+        setError('导出请求连接中断，请确认本地后端服务正在运行后重试');
+        return;
+      }
       setError(exportError instanceof Error ? exportError.message : '导出飞书失败');
     } finally {
       setExporting(false);
@@ -2597,7 +2780,7 @@ function BooksManagementPage({
       target.setPointerCapture(pointerId);
     }
     const startX = clientX;
-    const startWidth = taskColumnWidthsRef.current[columnKey];
+    const startWidth = getBookTaskColumnWidth(taskColumnWidthsRef.current, columnKey);
 
     function updateWidth(nextClientX: number) {
       const nextWidths = {
@@ -3008,6 +3191,30 @@ function BooksManagementPage({
                 placeholder="段落 / 标题 / 错误 / 章节"
               />
             </label>
+            <label className="workflow-group-select">
+              默认 Workflow 分组
+              <select
+                value={selectedWorkflowGroup?.id ?? selectedWorkflowGroupId}
+                onChange={(event) => setSelectedWorkflowGroupId(event.target.value)}
+                disabled={workflowGroups.length === 0 || selectedBatchIsRunning || isContinuing}
+              >
+                {workflowGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+              <span>
+                ID: {selectedWorkflowGroup?.id ?? selectedWorkflowGroupId}
+                <button
+                  type="button"
+                  className="inline-copy-button"
+                  onClick={() => void navigator.clipboard?.writeText(selectedWorkflowGroup?.id ?? selectedWorkflowGroupId)}
+                >
+                  复制
+                </button>
+              </span>
+            </label>
             <div className="filter-action-row">
               <button className="generate-filter-button" onClick={() => void searchTasks()} disabled={!selectedBook || isLoadingTasks}>
                 {isLoadingTasks ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
@@ -3024,14 +3231,17 @@ function BooksManagementPage({
                   isContinuing ||
                   isPausingGeneration ||
                   isCancelingGeneration ||
+                  !selectedWorkflowGroup ||
                   taskPagination.runnableTotal === 0
                 }
                 title={
                   !selectedBatch || isAllTaskListView
                     ? '请先选择一个上传文档任务清单后再执行生图'
+                    : !selectedWorkflowGroup
+                      ? '请先在 Workflow 管理中启用至少一个分组'
                     : selectedBatchIsRunning
                       ? '当前任务清单正在执行中'
-                      : `按当前任务列表范围执行：${continueScopeText}。改了筛选后请先点“查询”，已成功任务会重新生成并保留历史记录`
+                      : `按当前任务列表范围执行：${continueScopeText}。未绑定任务使用当前默认 Workflow 分组，已绑定任务保留原分组；改了筛选后请先点“查询”，已成功任务会重新生成并保留历史记录`
                 }
               >
                 {isContinuing ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
@@ -3075,17 +3285,38 @@ function BooksManagementPage({
             </div>
           </div>
 
+          {visibleBookExportResult && (
+            <div className="book-export-success inline-success">
+              <Database size={16} />
+              <span>
+                飞书导出成功：{visibleBookExportResult.recordsCreated} 行，{visibleBookExportResult.attachmentsUploaded} 个附件
+                {visibleBookExportResult.attachmentsFailed ? `，${visibleBookExportResult.attachmentsFailed} 个附件失败` : ''}
+              </span>
+              {visibleBookExportResult.baseUrl && (
+                <a href={visibleBookExportResult.baseUrl} target="_blank" rel="noreferrer">
+                  打开飞书 Base
+                </a>
+              )}
+            </div>
+          )}
+
           <div className="task-table-wrap book-task-table-wrap">
             <table className="task-table book-task-table" style={{ minWidth: taskTableMinWidth }}>
               <colgroup>
                 {BOOK_TASK_COLUMN_CONFIG.map((column) => (
-                  <col key={column.key} style={{ width: taskColumnWidths[column.key] }} />
+                  <col key={column.key} style={{ width: getBookTaskColumnWidth(taskColumnWidths, column.key) }} />
                 ))}
               </colgroup>
               <thead>
                 <tr>
                   {BOOK_TASK_COLUMN_CONFIG.map((column) => (
-                    <ResizableTableHeader column={column} key={column.key} onResizeStart={startColumnResize} />
+                    <ResizableTableHeader
+                      column={column}
+                      fullLabel={column.key === 'workflow_primary' || column.key === 'workflow_compare' ? workflowTaskColumnNames[column.key] : undefined}
+                      key={column.key}
+                      label={column.key === 'workflow_primary' || column.key === 'workflow_compare' ? shortWorkflowName(workflowTaskColumnNames[column.key]) : undefined}
+                      onResizeStart={startColumnResize}
+                    />
                   ))}
                 </tr>
               </thead>
@@ -3115,6 +3346,17 @@ function BooksManagementPage({
                         <span className="thumb-empty">-</span>
                       )}
                     </td>
+                    {WORKFLOW_RESULT_COLUMNS.map((column) => (
+                      <td key={column.key}>
+                        <WorkflowTaskResultCell
+                          result={workflowResultForTask(task, column.workflowId)}
+                          onPreview={(file) => {
+                            setSelectedTaskId(task.id);
+                            setLightboxFile(file);
+                          }}
+                        />
+                      </td>
+                    ))}
                     <td>
                       <div className="source-cell">
                         <strong>第 {task.row_no} 行</strong>
@@ -3142,7 +3384,7 @@ function BooksManagementPage({
                 ))}
                 {tasks.length === 0 && (
                   <tr>
-                    <td className="table-empty" colSpan={7}>
+                    <td className="table-empty" colSpan={BOOK_TASK_COLUMN_CONFIG.length}>
                       当前书籍没有匹配任务。
                     </td>
                   </tr>
@@ -3226,12 +3468,6 @@ function BooksManagementPage({
                 </div>
                 <ProgressCell task={selectedTask} wide />
                 <WorkflowResultCards results={workflowResultsForItem(selectedTask)} onPreview={setLightboxFile} />
-                {selectedTask.paragraph_description && (
-                  <div className="description-output">
-                    <strong>生图描述</strong>
-                    <p>{selectedTask.paragraph_description}</p>
-                  </div>
-                )}
                 <p className="detail-paragraph">{selectedTask.input.paragraph_content}</p>
                 {selectedTask.error && <div className="task-error">{selectedTask.error}</div>}
               </div>

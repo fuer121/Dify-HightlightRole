@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getDifyWorkflowConfigs } from './dify.js';
 import { registerWorkflowRoutes } from './workflowRoutes.js';
 import { closeStoreForTest } from './store.js';
-import { listWorkflowConfigs } from './workflowConfigs.js';
-import type { ManagedWorkflowConfig } from './types.js';
+import { createWorkflowGroup, listWorkflowConfigs, listWorkflowGroups, updateWorkflowGroup, updateWorkflowGroupWorkflow } from './workflowConfigs.js';
+import type { ManagedWorkflowConfig, ManagedWorkflowGroup } from './types.js';
 
 async function withWorkflowApp(run: (baseUrl: string) => Promise<void>) {
   const app = express();
@@ -59,6 +59,12 @@ describe('workflow configs', () => {
       { id: 'primary', name: '线上环境工作流', api_key: 'app-primary-env' },
       { id: 'compare', name: '对照环境工作流', api_key: 'app-compare-env' }
     ]);
+    expect(listWorkflowGroups()[0]).toMatchObject({
+      id: 'default',
+      name: '默认分组',
+      status: 'active',
+      is_default: true
+    });
   });
 
   it('updates workflow fields through API and keeps them persisted', async () => {
@@ -107,6 +113,46 @@ describe('workflow configs', () => {
     });
   });
 
+  it('creates workflow groups and updates group scoped workflow fields through API', async () => {
+    await withWorkflowApp(async (baseUrl) => {
+      const createResponse = await fetch(`${baseUrl}/api/workflow-groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'hu-v2', name: 'HU 第二版', note: '测试分组' })
+      });
+      expect(createResponse.status).toBe(200);
+      const createPayload = (await createResponse.json()) as { group: ManagedWorkflowGroup };
+      expect(createPayload.group).toMatchObject({
+        id: 'hu-v2',
+        name: 'HU 第二版',
+        status: 'active'
+      });
+      expect(createPayload.group.workflows).toMatchObject([
+        { id: 'primary', name: '主工作流' },
+        { id: 'compare', name: '对照工作流' }
+      ]);
+
+      const updateResponse = await fetch(`${baseUrl}/api/workflow-groups/hu-v2/workflows/compare`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'HU 对照', api_key: 'app-hu-compare' })
+      });
+      expect(updateResponse.status).toBe(200);
+      const updatePayload = (await updateResponse.json()) as { group: ManagedWorkflowGroup };
+      expect(updatePayload.group.workflows.find((workflow) => workflow.id === 'compare')).toMatchObject({
+        name: 'HU 对照',
+        api_key: 'app-hu-compare'
+      });
+    });
+  });
+
+  it('blocks disabled workflow groups from active list and Dify execution binding', () => {
+    createWorkflowGroup({ id: 'disabled-group', name: '禁用分组' });
+    updateWorkflowGroup('disabled-group', { status: 'disabled' });
+
+    expect(listWorkflowGroups(false).map((group) => group.id)).not.toContain('disabled-group');
+  });
+
   it('uses persisted name and key while preserving env api base and response mode', async () => {
     await withWorkflowApp(async (baseUrl) => {
       await fetch(`${baseUrl}/api/workflows/compare`, {
@@ -130,6 +176,31 @@ describe('workflow configs', () => {
         apiBase: 'http://compare.example/v1',
         apiKey: 'app-compare-updated',
         responseMode: 'blocking'
+      }
+    ]);
+  });
+
+  it('uses group scoped persisted workflow name and key for Dify configs', () => {
+    createWorkflowGroup({ id: 'image-test', name: '图像测试分组' });
+    updateWorkflowGroupWorkflow('image-test', 'primary', { name: '图像主流程', api_key: 'app-image-primary' });
+    updateWorkflowGroupWorkflow('image-test', 'compare', { name: '图像对照流程', api_key: 'app-image-compare' });
+
+    expect(getDifyWorkflowConfigs('image-test')).toMatchObject([
+      {
+        id: 'primary',
+        groupId: 'image-test',
+        groupName: '图像测试分组',
+        name: '图像主流程',
+        apiKey: 'app-image-primary',
+        apiBase: 'http://primary.example/v1'
+      },
+      {
+        id: 'compare',
+        groupId: 'image-test',
+        groupName: '图像测试分组',
+        name: '图像对照流程',
+        apiKey: 'app-image-compare',
+        apiBase: 'http://compare.example/v1'
       }
     ]);
   });

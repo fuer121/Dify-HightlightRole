@@ -1,6 +1,6 @@
 import type { BatchTask, DifyRunResult, ResultFile, WorkflowResult } from './types.js';
 import { ensureLocalFile, registerBase64File, registerRemoteFile } from './fileStore.js';
-import { listWorkflowConfigs } from './workflowConfigs.js';
+import { DEFAULT_WORKFLOW_GROUP_ID, getWorkflowGroup, getWorkflowConfigsForGroup } from './workflowConfigs.js';
 
 interface DifyErrorOptions {
   retryable?: boolean;
@@ -10,6 +10,8 @@ interface DifyErrorOptions {
 export interface DifyWorkflowConfig {
   id: string;
   name: string;
+  groupId: string;
+  groupName: string;
   apiBase: string;
   apiKey?: string;
   responseMode: string;
@@ -32,20 +34,24 @@ function apiUrl(pathname: string, apiBase = process.env.DIFY_API_BASE ?? 'http:/
   return `${base.replace(/\/$/, '')}${pathname}`;
 }
 
-export function getDifyWorkflowConfigs(): DifyWorkflowConfig[] {
+export function getDifyWorkflowConfigs(groupId = DEFAULT_WORKFLOW_GROUP_ID): DifyWorkflowConfig[] {
+  const group = getWorkflowGroup(groupId);
+  if (!group) throw new DifyError(`Workflow 分组不存在：${groupId}`, { retryable: false });
   const primaryApiBase = process.env.DIFY_API_BASE ?? 'http://dify.qmniu.com/v1';
   const primaryResponseMode = process.env.DIFY_RESPONSE_MODE || 'streaming';
-  return listWorkflowConfigs().map((workflow) => ({
+  return getWorkflowConfigsForGroup(group.id).map((workflow) => ({
     id: workflow.id,
     name: workflow.name,
+    groupId: group.id,
+    groupName: group.name,
     apiBase: workflow.id === 'compare' ? process.env.DIFY_COMPARE_API_BASE ?? primaryApiBase : primaryApiBase,
     apiKey: workflow.api_key,
     responseMode: workflow.id === 'compare' ? process.env.DIFY_COMPARE_RESPONSE_MODE || primaryResponseMode : primaryResponseMode
   }));
 }
 
-function configuredDifyWorkflowConfigs() {
-  return getDifyWorkflowConfigs().filter((config) => Boolean(config.apiKey));
+function configuredDifyWorkflowConfigs(groupId = DEFAULT_WORKFLOW_GROUP_ID) {
+  return getDifyWorkflowConfigs(groupId).filter((config) => Boolean(config.apiKey));
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -299,7 +305,7 @@ export async function runDifyWorkflow(
   batchId: string,
   onEvent?: (payload: unknown) => void
 ): Promise<DifyRunResult> {
-  return runDifyWorkflowWithConfig(getDifyWorkflowConfigs()[0], task, batchId, onEvent);
+  return runDifyWorkflowWithConfig(getDifyWorkflowConfigs(task.workflow_group_id ?? DEFAULT_WORKFLOW_GROUP_ID)[0], task, batchId, onEvent);
 }
 
 export async function runDifyWorkflowWithConfig(
@@ -378,8 +384,14 @@ export async function stopDifyWorkflowTaskWithConfig(config: DifyWorkflowConfig,
   return response.json().catch(() => ({}));
 }
 
-export async function stopDifyWorkflowTaskByWorkflowId(taskId: string, batchId: string, workflowId = 'primary') {
-  const config = getDifyWorkflowConfigs().find((item) => item.id === workflowId) ?? getDifyWorkflowConfigs()[0];
+export async function stopDifyWorkflowTaskByWorkflowId(
+  taskId: string,
+  batchId: string,
+  workflowId = 'primary',
+  workflowGroupId = DEFAULT_WORKFLOW_GROUP_ID
+) {
+  const configs = getDifyWorkflowConfigs(workflowGroupId);
+  const config = configs.find((item) => item.id === workflowId) ?? configs[0];
   return stopDifyWorkflowTaskWithConfig(config, taskId, batchId);
 }
 
@@ -455,7 +467,7 @@ async function normalizeFileValue(taskId: string, value: unknown): Promise<Resul
 async function workflowResultFromDifyRun(
   taskId: string,
   result: DifyRunResult,
-  config: Pick<DifyWorkflowConfig, 'id' | 'name'>,
+  config: Pick<DifyWorkflowConfig, 'id' | 'name' | 'groupId' | 'groupName'>,
   elapsedSeconds?: number
 ): Promise<WorkflowResult> {
   const outputs = result.outputs ?? {};
@@ -485,6 +497,8 @@ async function workflowResultFromDifyRun(
   return {
     workflow_id: config.id,
     workflow_name: config.name,
+    workflow_group_id: config.groupId,
+    workflow_group_name: config.groupName,
     status: 'succeeded',
     workflow_run_id: result.workflowRunId,
     dify_task_id: result.taskId,
@@ -537,7 +551,7 @@ export function applyWorkflowResultsToTask(task: BatchTask, workflowResults: Wor
 }
 
 export async function applyDifyResult(task: BatchTask, result: DifyRunResult) {
-  const workflowResult = await workflowResultFromDifyRun(task.id, result, getDifyWorkflowConfigs()[0]);
+  const workflowResult = await workflowResultFromDifyRun(task.id, result, getDifyWorkflowConfigs(task.workflow_group_id ?? DEFAULT_WORKFLOW_GROUP_ID)[0]);
   task.workflow_results = [workflowResult];
   applyWorkflowResultToTask(task, workflowResult);
 }
@@ -546,6 +560,8 @@ function workflowFailureResult(config: DifyWorkflowConfig, error: unknown, elaps
   return {
     workflow_id: config.id,
     workflow_name: config.name,
+    workflow_group_id: config.groupId,
+    workflow_group_name: config.groupName,
     status: 'failed',
     elapsed_seconds: elapsedSeconds,
     result_files: [],
@@ -565,6 +581,8 @@ function updateRunningWorkflowResult(task: BatchTask, config: DifyWorkflowConfig
     status: 'running',
     result_files: [],
     ...existing,
+    workflow_group_id: existing?.workflow_group_id ?? config.groupId,
+    workflow_group_name: existing?.workflow_group_name ?? config.groupName,
     dify_task_id: difyTaskId ?? existing?.dify_task_id,
     workflow_run_id: workflowRunId ?? existing?.workflow_run_id
   };
@@ -578,9 +596,10 @@ export async function runDifyWorkflows(
   batchId: string,
   onEvent?: (payload: unknown) => void
 ): Promise<WorkflowResult[]> {
-  const configs = configuredDifyWorkflowConfigs();
+  const workflowGroupId = task.workflow_group_id ?? DEFAULT_WORKFLOW_GROUP_ID;
+  const configs = configuredDifyWorkflowConfigs(workflowGroupId);
   if (configs.length === 0) {
-    throw new DifyError('缺少 DIFY_API_KEY，请检查 .env.local', { retryable: false });
+    throw new DifyError(`Workflow 分组 ${workflowGroupId} 缺少可用 API key，请检查 Workflow 管理配置`, { retryable: false });
   }
 
   return Promise.all(

@@ -87,6 +87,7 @@ const tasksPayload = {
       input: { book_id: 1, paragraph_content: '第一段', chapter_sort: 1 },
       status: 'queued',
       attempts: 0,
+      paragraph_description: '任务级混合描述',
       result_files: [],
       workflow_results: [
         {
@@ -97,6 +98,7 @@ const tasksPayload = {
           dify_task_id: 'task-primary',
           elapsed_seconds: 12.3,
           is_valid: 1,
+          paragraph_description: '线上工作流生图描述',
           role: ['主角A'],
           result_files: []
         },
@@ -108,6 +110,7 @@ const tasksPayload = {
           dify_task_id: 'task-compare',
           elapsed_seconds: 45.6,
           is_valid: 0,
+          paragraph_description: '对照工作流生图描述',
           role: ['主角B'],
           result_files: []
         }
@@ -129,6 +132,25 @@ const tasksPayload = {
     totalPages: 1,
     runnableTotal: 2
   }
+};
+
+const workflowGroupsPayload = {
+  groups: [
+    {
+      id: 'default',
+      name: '默认分组',
+      status: 'active',
+      is_default: true,
+      workflows: []
+    },
+    {
+      id: 'hu-v2',
+      name: 'HU 分组',
+      status: 'active',
+      is_default: false,
+      workflows: []
+    }
+  ]
 };
 
 const runningTasksPayload = {
@@ -159,6 +181,17 @@ const continuePayload = {
   pauseRequested: false,
   tasks: tasksPayload.tasks,
   events: []
+};
+
+const exportPayload = {
+  baseToken: 'base-token-1',
+  baseUrl: 'https://example.feishu.cn/base/base-token-1',
+  tableId: 'table-1',
+  tableName: '批量结果',
+  createdAt: '2026-06-11T06:25:11.804Z',
+  recordsCreated: 3174,
+  attachmentsUploaded: 38,
+  attachmentsFailed: 0
 };
 
 function jsonResponse(payload: unknown) {
@@ -241,6 +274,7 @@ describe('BooksManagementPage continue scope', () => {
       const url = String(input);
 
       if (url.endsWith('/api/health')) return jsonResponse({ config: { difyWorkflowName: '测试工作流' } });
+      if (url.endsWith('/api/workflow-groups')) return jsonResponse(workflowGroupsPayload);
       if (url.endsWith('/api/books')) return jsonResponse(booksPayload);
       if (url.endsWith('/api/books/1/batches')) return jsonResponse(batchesPayload);
       if (url.includes('/api/books/1/tasks')) return jsonResponse(tasksPayload);
@@ -249,6 +283,7 @@ describe('BooksManagementPage continue scope', () => {
       if (url.includes('/api/books/1/continue')) return jsonResponse(continuePayload);
       if (url.includes('/api/books/1/pause')) return jsonResponse(continuePayload);
       if (url.includes('/api/books/1/cancel')) return jsonResponse(continuePayload);
+      if (url.includes('/api/batches/batch-1/export/lark')) return jsonResponse(exportPayload);
 
       throw new Error(`Unhandled fetch: ${url}`);
     });
@@ -305,6 +340,48 @@ describe('BooksManagementPage continue scope', () => {
     expect(detail?.textContent).not.toContain('任务：');
   });
 
+  it('sanitizes stale book task column width cache before rendering the table', async () => {
+    const storage = new Map<string, string>();
+    const localStorageMock = {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storage.set(key, value);
+      }),
+      removeItem: vi.fn((key: string) => {
+        storage.delete(key);
+      })
+    };
+    vi.stubGlobal('localStorage', localStorageMock);
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock
+    });
+    localStorageMock.setItem(
+      'dify-books:task-table-column-widths',
+      JSON.stringify({
+        status: null,
+        image: 'bad-cache',
+        workflow_primary: -100,
+        workflow_compare: 99999
+      })
+    );
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    const table = container.querySelector('.book-task-table');
+    expect(table?.getAttribute('style')).not.toContain('NaN');
+    for (const column of Array.from(container.querySelectorAll('.book-task-table col'))) {
+      expect(column.getAttribute('style')).not.toContain('NaN');
+    }
+
+    localStorageMock.removeItem('dify-books:task-table-column-widths');
+  });
+
   it('resizes the book task list and detail panels by dragging the divider', async () => {
     await act(async () => {
       root.render(<App />);
@@ -355,6 +432,8 @@ describe('BooksManagementPage continue scope', () => {
       .map(([url]) => String(url))
       .find((url) => url.includes('/api/books/1/continue'));
     expect(continueWithoutQuery).toBe('/api/books/1/continue?batchId=batch-1');
+    const firstContinueCall = fetchSpy.mock.calls.find(([url]) => String(url).includes('/api/books/1/continue'));
+    expect(JSON.parse(String(firstContinueCall?.[1]?.body ?? '{}'))).toEqual({ workflowGroupId: 'default' });
 
     await act(async () => {
       findButton(container, '查询').click();
@@ -420,6 +499,114 @@ describe('BooksManagementPage continue scope', () => {
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('仅取消当前筛选范围内未完成任务'));
   });
 
+  it('shows the Feishu Base link after exporting the selected task list', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导出飞书').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    expect(findLastCallUrl(fetchSpy, '/api/batches/batch-1/export/lark')).toBe('/api/batches/batch-1/export/lark?batchId=batch-1&bookId=1');
+    expect(container.textContent).toContain('飞书导出成功：3174 行，38 个附件');
+    const exportLink = Array.from(container.querySelectorAll('a')).find((node) => node.textContent?.includes('打开飞书 Base'));
+    expect(exportLink?.getAttribute('href')).toBe('https://example.feishu.cn/base/base-token-1');
+  });
+
+  it('exports the last applied filtered task scope to Feishu', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    const statusSelect = findSelectByLabel(container, '任务状态');
+    await act(async () => {
+      statusSelect.value = 'succeeded';
+      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      findButton(container, '查询').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导出飞书').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    expect(findLastCallUrl(fetchSpy, '/api/batches/batch-1/export/lark')).toBe('/api/batches/batch-1/export/lark?status=succeeded&batchId=batch-1&bookId=1');
+  });
+
+  it('shows separate result columns for the two Dify workflows', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    const headers = Array.from(container.querySelectorAll('th')).map((node) => ({
+      text: node.textContent?.replace(/\s+/g, ' ').trim(),
+      title: node.getAttribute('title')
+    }));
+
+    expect(headers).toContainEqual(expect.objectContaining({ text: expect.stringContaining('线上工作流'), title: '线上工作流' }));
+    expect(headers).toContainEqual(expect.objectContaining({ text: expect.stringContaining('对照工作流'), title: '对照工作流' }));
+  });
+
+  it('shows image descriptions inside each workflow card instead of a task-level mixed description', async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    const workflowDescriptions = Array.from(container.querySelectorAll('.workflow-result-card .description-output')).map((node) =>
+      node.textContent?.replace(/\s+/g, ' ').trim()
+    );
+
+    expect(workflowDescriptions).toEqual([
+      expect.stringContaining('线上工作流生图描述'),
+      expect.stringContaining('对照工作流生图描述')
+    ]);
+    expect(container.querySelector('.result-body > .description-output')).toBeNull();
+  });
+
   it('keeps automatic reloads on the applied scope after continue succeeds', async () => {
     await act(async () => {
       root.render(<App />);
@@ -479,6 +666,7 @@ describe('BooksManagementPage continue scope', () => {
       const url = String(input);
 
       if (url.endsWith('/api/health')) return jsonResponse({ config: { difyWorkflowName: '测试工作流' } });
+      if (url.endsWith('/api/workflow-groups')) return jsonResponse(workflowGroupsPayload);
       if (url.endsWith('/api/books')) return jsonResponse(booksPayload);
       if (url.endsWith('/api/books/1/batches')) return jsonResponse(runningBatchesPayload);
       if (url.includes('/api/books/1/tasks')) {
@@ -618,6 +806,49 @@ describe('BooksManagementPage continue scope', () => {
     expect(continueButton.disabled).toBe(false);
     expect(continueButton.title).toContain('状态 成功');
     expect(findLastCallUrl(fetchSpy, '/api/books/1/tasks')).toContain('/api/books/1/tasks?status=succeeded&batchId=batch-1&page=1&pageSize=');
+  });
+
+  it('does not mark the current book as running when only another book is running in the same batch', async () => {
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/health')) return jsonResponse({ config: { difyWorkflowName: '测试工作流' } });
+      if (url.endsWith('/api/workflow-groups')) return jsonResponse(workflowGroupsPayload);
+      if (url.endsWith('/api/books')) return jsonResponse(booksPayload);
+      if (url.endsWith('/api/books/1/batches')) {
+        return jsonResponse({
+          batches: [
+            {
+              ...batchesPayload.batches[0],
+              status: 'running',
+              running_count: 0
+            }
+          ]
+        });
+      }
+      if (url.includes('/api/books/1/tasks')) return jsonResponse(tasksPayload);
+      if (url.endsWith('/api/tasks/task-1/runs')) return jsonResponse({ runs: [] });
+      if (url.endsWith('/api/tasks/task-2/runs')) return jsonResponse({ runs: [] });
+      if (url.includes('/api/books/1/continue')) return jsonResponse(continuePayload);
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    await flushUi();
+    await flushUi();
+    await flushUi();
+
+    await act(async () => {
+      findButton(container, '导入批次一').click();
+    });
+    await flushUi();
+    await flushUi();
+
+    expect(container.textContent).not.toContain('当前任务清单正在执行');
+    expect(findButton(container, '执行生图').disabled).toBe(false);
   });
 
   it('does not implicitly refresh tasks or apply unsaved drafts when pressing Enter in the range popover', async () => {
